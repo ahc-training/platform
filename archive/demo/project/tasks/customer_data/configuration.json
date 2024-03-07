@@ -1,0 +1,8 @@
+{
+    "s3_endpoint": "minio.minio-data.svc",
+    "s3_access_key": "6TQSXN8R41TTQJEL2GQX",
+    "s3_secret_key": "3DeSctS6I1e9OrEKdJN8HitcAJbHL3LIl2eJxMA5",
+    "postgers_url": "jdbc:postgresql://bitnami-postgresql-postgresql-ha-pgpool.postgresql.svc:5432/dvdrental",
+    "postgres_username": "postgres",
+    "postgres_password": "Sql123!"
+}

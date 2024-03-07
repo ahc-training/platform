@@ -1,0 +1,113 @@
+pipeline {
+    agent {
+        kubernetes {
+            inheritFrom 'docker-image-pod'
+            defaultContainer 'buildkit'
+            yaml """
+                apiVersion: v1
+                kind: Pod
+                metadata:
+                  label:
+                    jenkins: docker-image-pod
+                spec:
+                  containers:
+                    - name: buildkit
+                      image: moby/buildkit:master
+                      tty: true
+                      securityContext:
+                        privileged: true
+                      volumeMounts:
+                        - name: docker-config
+                          mountPath: '/root/.docker'
+                  volumes:
+                    - name: docker-config
+                      secret:
+                        secretName: 'docker-config'
+                  restartPolicy: Never
+            """
+        }
+    }
+
+    parameters {
+	string(
+	    name: 'registry',
+	    defaultValue: 'registry.example.com:5000',
+	    description: 'Container Registry'
+	)
+	string(
+	    name: 'image_name',
+	    defaultValue: 'kafka-app',
+	    description: 'Image Name'
+	)
+    }
+    
+    stages {
+        stage('Build & push image') {
+            steps {
+                container('buildkit') {
+                    sh """
+                        buildctl build --frontend dockerfile.v0 --local context=. --local dockerfile=. --export-cache type=local,dest=/tmp/buildkit/cache --output type=image,name=${params.registry}/${params.image_name}:${BUILD_NUMBER},push=true
+                        buildctl build --frontend dockerfile.v0 --local context=. --local dockerfile=. --import-cache type=local,src=/tmp/buildkit/cache --output type=image,name=${params.registry}/${params.image_name}:latest,push=true
+                    """
+                 }
+            }
+        }
+
+        stage('Create k8s namespace') {
+            agent {
+                kubernetes {
+                    yaml """
+apiVersion: v1
+kind: Namespace
+metadata:
+    name: kafka-app
+                    """
+                }
+            }
+        }
+
+        stage('Run Kafka Consumer on k8s') {
+            agent {
+                kubernetes {
+                    yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+    namespace: kafka-app
+    name: kafka-cproducer
+spec:
+    containers:
+        - name: consumer
+          image: ${registry}/${params.image_name}:latest
+          env:
+          - name: APP
+            value:Consumer
+    restartPolicy: OnFailure
+                    """
+                }
+            }
+        }
+
+        stage('Run Kafka Producer on k8s') {
+            agent {
+                kubernetes {
+                    yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+    namespace: kafka-app
+    name: kafka-cproducer
+spec:
+    containers:
+        - name: producer
+          image: ${registry}/${params.image_name}:latest
+          env:
+          - name: APP
+            value:Producer
+    restartPolicy: OnFailure
+                    """
+                }
+            }
+        }
+    }
+}

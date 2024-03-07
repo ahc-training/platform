@@ -1,0 +1,60 @@
+- name: Change kube-proxy to IPVS mode
+  shell: 'kubectl get configmap kube-proxy -n kube-system -o yaml | sed -e "s/mode: \"\"/mode: \"IPVS\"/" | kubectl apply -f - -n kube-system'
+
+- name: Change kube-proxy to enable strictARP
+  shell: 'kubectl get configmap kube-proxy -n kube-system -o yaml | sed -e "s/strictARP: false/strictARP: true/" | kubectl apply -f - -n kube-system'
+
+- name: Install helm repo
+  kubernetes.core.helm_repository:
+    name: metallb
+    repo_url: "https://metallb.github.io/metallb"
+
+- name: Install Metallb
+  kubernetes.core.helm:
+    name: metallb
+    release_namespace: metallb-system
+    create_namespace: true
+    update_repo_cache: true
+    chart_ref: metallb/metallb
+
+- name: Add privileges to namespace
+  kubernetes.core.k8s:
+    state: patched
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: metallb-system
+        labels:
+          pod-security.kubernetes.io/enforce: privileged
+          pod-security.kubernetes.io/audit: privileged
+          pod-security.kubernetes.io/warn: privileged
+
+- pause:
+    seconds: 60
+
+- name: Create IPAddressPool
+  kubernetes.core.k8s:
+    state: present
+    namespace: metallb-system
+    definition:
+      apiVersion: metallb.io/v1beta1
+      kind: IPAddressPool
+      metadata:
+        name: k8s-pool
+      spec:
+        addresses:
+        - "{{ ip_range }}"
+
+- name: Create L2Advertisement
+  kubernetes.core.k8s:
+    state: present
+    namespace: metallb-system
+    definition:
+      apiVersion: metallb.io/v1beta1
+      kind: L2Advertisement
+      metadata:
+        name: lb-advertisement
+      spec:
+        ipAddressPools:
+        - k8s-pool

@@ -1,0 +1,85 @@
+- name: Install helm repo
+  kubernetes.core.helm_repository:
+    name: openebs
+    repo_url: "https://openebs.github.io/charts"
+
+- name: Install OpenEBS
+  kubernetes.core.helm:
+    name: openebs
+    release_namespace: openebs
+    create_namespace: true
+    update_repo_cache: true
+    chart_ref: openebs/openebs
+    values:
+      cstor:
+        enabled: true
+
+- name: Check if openebs pods are running
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: openebs
+  register: pod_list
+  until: pod_list|json_query('resources[*].status.phase')|unique == ["Running"]
+  retries: 50
+  delay: 10
+
+# - name: Change failurePolicy in openebs-cstor-validation-webhoo
+#   shell: 'kubectl get validatingwebhookconfigurations openebs-cstor-validation-webhook -n openebs -o yaml | sed -e "s/failurePolicy: Fail/failurePolicy: Ignore/" | kubectl apply -f - -n openebs'
+
+- name: Get blockdevices for OpenEBS
+  kubernetes.core.k8s_info:
+    api_version: openebs.io/v1alpha1
+    kind: bd
+    namespace: openebs
+  register: bd_output
+
+- name: Convert json to list with blockdevices
+  set_fact:
+    bd_list: "{{ bd_output | json_query(jmesquery) }}"
+  vars:
+    jmesquery: "resources[*].{hostname: metadata.labels.nodename, blockdevice: metadata.name}"
+  when: bd_output is defined
+
+- name: Create CStorPoolCluster yaml from template
+  set_fact:
+    cspc_yaml: |
+      apiVersion: cstor.openebs.io/v1
+      kind: CStorPoolCluster
+      metadata:
+        name: cstor-disk-pool
+        namespace: openebs
+      spec:
+        pools:
+        {% for item in bd_list%}
+        - nodeSelector:
+              kubernetes.io/hostname: "{{ item.hostname }}"
+            dataRaidGroups:
+              - blockDevices:
+                  - blockDeviceName: "{{ item.blockdevice }}"
+            poolConfig:
+              dataRaidGroupType: "stripe"
+              
+        {% endfor %}
+
+- name: Configure CStorPoolCluster
+  kubernetes.core.k8s:
+    state: present
+    namespace: openebs
+    definition: "{{ cspc_yaml }}"
+
+- name: Configure storageClass
+  kubernetes.core.k8s:
+    state: present
+    namespace: openebs
+    definition:
+      kind: StorageClass
+      apiVersion: storage.k8s.io/v1
+      metadata:
+        name: cstor-csi-disk
+      provisioner: cstor.csi.openebs.io
+      allowVolumeExpansion: true
+      parameters:
+        cas-type: cstor
+        cstorPoolCluster: cstor-disk-pool
+        # replicaCount is the number of CStorPoolCluster (n <= max)
+        replicaCount: "1"

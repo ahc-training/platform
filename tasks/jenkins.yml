@@ -1,0 +1,199 @@
+- name: Create namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: devops
+
+- name: Create clusterrole for jenkins
+  kubernetes.core.k8s:
+    state: present
+    namespace: devops
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: jenkins-admin
+      rules:
+        - apiGroups: [""]
+          resources: ["*"]
+          verbs: ["*"]
+
+- name: Create serviceaccount for jenkins
+  kubernetes.core.k8s:
+    state: present
+    namespace: devops
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: jenkins-admin
+        namespace: devops
+
+- name: Create clusterrolebinding for jenkins
+  kubernetes.core.k8s:
+    state: present
+    namespace: devops
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: jenkins-admin
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: jenkins-admin
+      subjects:
+      - kind: ServiceAccount
+        name: jenkins-admin
+        namespace: devops
+
+- name: Create ConfigMap for jenkins
+  kubernetes.core.k8s:
+    state: present
+    namespace: devops
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: jenkins
+      data:
+        jenkins_opts: --httpPort=8080
+        executors.groovy: |
+          import jenkins.model.*
+          Jenkins.instance.setNumExecutors(5)
+
+- name: Configure deployment for jenkins
+  kubernetes.core.k8s:
+    state: present
+    namespace: devops
+    definition:
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: jenkins
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: jenkins
+        template:
+          metadata:
+            labels:
+              app: jenkins
+          spec:
+            securityContext:
+              fsGroup: 1000
+              runAsUser: 1000
+            serviceAccountName: jenkins-admin
+            containers:
+              - name: jenkins
+                image: jenkins/jenkins:lts
+                resources:
+                  limits:
+                    memory: "2Gi"
+                    cpu: "1000m"
+                  requests:
+                    memory: "500Mi"
+                    cpu: "500m"
+                ports:
+                  - name: http-port
+                    containerPort: 8080
+                  - name: jnlp-port
+                    containerPort: 50000
+                livenessProbe:
+                  httpGet:
+                    path: "/login"
+                    port: 8080
+                  initialDelaySeconds: 90
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 5
+                readinessProbe:
+                  httpGet:
+                    path: "/login"
+                    port: 8080
+                  initialDelaySeconds: 60
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+                volumeMounts:
+                  - name: jenkins-volume-claim
+                    mountPath: /var/jenkins_home
+            env:
+              - name: JAVA_OPTS
+                valueFrom:
+                  configMapKeyRef:
+                    name: jenkins
+                    key: jenkins_opts
+        volumeClaimTemplates:
+          - metadata:
+              name: jenkins-volume-claim
+            spec:
+              accessModes:
+                - ReadWriteOnce
+              volumeMode: Filesystem
+              resources:
+                requests:
+                  storage: 2Gi
+              storageClassName: "cstor-csi-disk"
+
+
+- name: Configure service for jenkins
+  kubernetes.core.k8s:
+    state: present
+    namespace: devops
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: jenkins
+        annotations:
+          lb.kubesphere.io/v1alpha1: openelb
+          protocol.openelb.kubesphere.io/v1alpha1: layer2
+          eip.openelb.kubesphere.io/v1alpha2: eip-k8s-pool
+      spec:
+        selector:
+          app: jenkins
+        type: LoadBalancer
+        ports:
+          - name: httpport
+            port: 8080
+            targetPort: 8080
+          - name: jnlpport
+            port: 50000
+            targetPort: 50000
+        externalTrafficPolicy: Cluster
+
+- name: Configure Service for jenkins-jnlp
+  kubernetes.core.k8s:
+    state: present
+    namespace: devops
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: jenkins-jnlp
+      spec:
+        type: ClusterIP
+        ports:
+          - port: 50000
+            targetPort: 50000
+        selector:
+          app: jenkins
+
+- name: Configure secret for docker-config
+  kubernetes.core.k8s:
+    state: present
+    namespace: devops
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        namespace: devops
+        name: docker-config
+      data:
+        config.json: ewogICJhdXRocyI6IHsKICAgICAiaHR0cHM6Ly9yZWdpc3RyeS5haC1jb25zdWx0YW5jeS5uZXQ6NTAwMCI6IHsKICAgICAgICJhdXRoIjogImRtRm5jbUZ1ZERwMllXZHlZVzUwIgogICAgIH0KICB9Cn0K
+

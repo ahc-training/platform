@@ -1,0 +1,18 @@
+- hosts: k8s-cp-1
+  vars:
+    path: "{{ inventory_dir }}/tasks"
+  tasks:
+    - name: "Installing: {{ k8s_dependencies | join(', ')}}"
+      ansible.builtin.include_tasks: "{{ path }}/{{ item }}.yml"
+      when: k8s_dependencies is defined and k8s_dependencies != None and lookup("fileglob", path + "/" + item + ".yml", errors="warn")
+      with_items: "{{ k8s_dependencies }}"
+
+    - name: "Installing: {{ k8s_tasks | join(', ')}}"
+      ansible.builtin.include_tasks: "{{ path }}/{{ item }}.yml"
+      when: k8s_tasks is defined and k8s_tasks != None and lookup("fileglob", path + "/" + item + ".yml", errors="warn")
+      with_items: "{{ k8s_tasks }}"
+
+    - name: "Installing: {{ k8s_postinstall | join(', ')}}"
+      ansible.builtin.include_tasks: "{{ path }}/{{ item }}.yml"
+      when: k8s_postinstall is defined and k8s_postinstall != None and lookup("fileglob", path + "/" + item + ".yml", errors="warn")
+      with_items: "{{ k8s_postinstall }}"

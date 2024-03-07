@@ -1,0 +1,49 @@
+- hosts: 127.0.0.1
+  connection: local
+  tasks:
+    - name: Add apt keys
+      become: true
+      ansible.builtin.get_url:
+        url: "{{ item.url }}"
+        dest: "/usr/share/keyrings/{{ item.name }}"
+        mode: 0644
+        owner: root
+        group: root
+      with_items:
+        - url: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+          name: brave-browser-archive-keyring.gpg
+        # - url: https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg
+        #   name: vscodium-archive-keyring.asc
+
+    - name: Add apt repositories
+      become: true
+      ansible.builtin.apt_repository:
+        state: present
+        repo: "{{ item.repo }}"
+        filename: "{{ item.filename }}"
+      with_items:
+        - repo: "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg arch=amd64] https://brave-browser-apt-release.s3.brave.com/ stable main"
+          filename: brave-browser-release
+        # - repo: "deb [ signed-by=/usr/share/keyrings/vscodium-archive-keyring.asc ] https://download.vscodium.com/debs vscodium main"
+        #   filename: vscodium.list
+
+    - name: Install applications
+      become: true
+      ansible.builtin.apt:
+        state: present
+        name: [ansible, git, git-lfs, apt-transport-https, curl, brave-browser, vim, multitail, fwupd, nvidia-driver-525, podman, python3-pip, kafkacat]
+        update_cache: true
+
+    - name: Install python3 libraries
+      ansible.builtin.pip:
+        name: [pyyaml, podman-compose, poetry, jupyterlab]
+
+    - name: Install ansible plugins
+      ansible.builtin.shell: "ansible-galaxy collection install {{ item }}"
+      with_items:
+        - kubernetes.core
+        - containers.podman
+
+    - name: Reboot server
+      become: true
+      ansible.builtin.shell: reboot

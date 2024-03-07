@@ -1,0 +1,38 @@
+- name: Install helm repo
+  kubernetes.core.helm_repository:
+    name: elastic
+    repo_url: https://charts.bitnami.com/bitnami
+
+- name: Install helm chart for Elastic Search
+  kubernetes.core.helm:
+    name: elasticsearch
+    release_namespace: elastic
+    create_namespace: true
+    update_repo_cache: true
+    chart_ref: bitnami/elasticsearch
+    values: 
+      master:
+        persistence:
+          storageClass: "cstor-csi-disk"
+      service:
+        type: LoadBalancer
+        annotations:
+          lb.kubesphere.io/v1alpha1: openelb
+          protocol.openelb.kubesphere.io/v1alpha1: layer2
+          eip.openelb.kubesphere.io/v1alpha2: eip-k8s-pool
+        externalTrafficPolicy: Cluster
+      data:
+        persistence:
+          storageClass: "cstor-csi-disk"
+      global:
+        kibanaEnabled: true
+      kibana:
+        persistence:
+          storageClass: "cstor-csi-disk"
+        service:
+          type: LoadBalancer
+          annotations:
+            lb.kubesphere.io/v1alpha1: openelb
+            protocol.openelb.kubesphere.io/v1alpha1: layer2
+            eip.openelb.kubesphere.io/v1alpha2: eip-k8s-pool
+          externalTrafficPolicy: Cluster

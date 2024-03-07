@@ -1,0 +1,13 @@
+- name: Check if all basic pods are running
+  kubernetes.core.k8s_info:
+    kind: Pod
+  register: pod_list
+  until: pod_list|json_query('resources[*].status.phase')|unique == ["Running"]
+  retries: 50
+  delay: 30
+
+- include_tasks: openebs.yml
+
+- include_tasks: nfsstorage.yml
+
+- include_tasks: "{{ lb_type }}.yml"

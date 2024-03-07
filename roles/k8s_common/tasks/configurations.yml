@@ -1,0 +1,5 @@
+- name: Install Helm diff plugin
+  become_user: vagrant
+  kubernetes.core.helm_plugin:
+    plugin_path: https://github.com/databus23/helm-diff
+    state: present

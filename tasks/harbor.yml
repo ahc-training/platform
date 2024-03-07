@@ -1,0 +1,63 @@
+# The postgres driver is not up to date in the notary containers and therefore cannot connect to postgresql.
+# https://github.com/goharbor/harbor/issues/15731
+
+
+- name: Install helm repo
+  kubernetes.core.helm_repository:
+    name: harbor
+    repo_url: https://helm.goharbor.io
+
+- name: Install helm chart
+  kubernetes.core.helm:
+    name: harbor
+    release_namespace: harbor
+    create_namespace: true
+    update_repo_cache: true
+    chart_ref: harbor/harbor
+    values:
+      expose:
+        type: loadBalancer
+        tls:
+          enabled: true
+          certSource: secret
+          secret:
+            secretName: certs-secret
+        loadBalancer:
+          annotations:
+            lb.kubesphere.io/v1alpha1: openelb
+            protocol.openelb.kubesphere.io/v1alpha1: layer2
+            eip.openelb.kubesphere.io/v1alpha2: eip-k8s-pool
+      ipFamily:
+        ipv6:
+          enabled: false
+      persistence:
+        enabled: true
+        resourcePolicy: ""
+        persistentVolumeClaim:
+          registry:
+            storageClass: "cstor-csi-disk"
+          chartmuseum:
+            storageClass: "cstor-csi-disk"
+          jobservice:
+            jobLog:
+              storageClass: "cstor-csi-disk"
+            scanDataExports:
+              storageClass: "cstor-csi-disk"
+          trivy:
+            storageClass: "cstor-csi-disk"
+      database:
+        type: external
+        external:
+          host: "bitnami-postgresql-postgresql-ha-pgpool.postgresql.svc"
+          port: "5432"
+          username: "{{ postgres_usr }}"
+          password: "{{ postgres_pwd }}"
+      redis:
+        type: external
+        external:
+          addr: "10.111.105.134:6379"
+          coreDatabaseIndex: "1"
+          jobserviceDatabaseIndex: "2"
+          registryDatabaseIndex: "3"
+          chartmuseumDatabaseIndex: "4"
+          trivyAdapterIndex: "6"

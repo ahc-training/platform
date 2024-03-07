@@ -1,0 +1,28 @@
+kubernetes:
+  config: "~/.kube/config"
+  controlplanes:
+    - k8s-cp-1: "192.167.56.11"
+  nodes:
+    - k8s-n-1: "192.167.56.12"
+    - k8s-n-2: "192.167.56.13"
+libvirt:
+  uri: "qemu:///system"
+  image_url: "https://cloud-images.ubuntu.com/releases/20.04/release/ubuntu-20.04-server-cloudimg-amd64.img"
+  volume:
+    name: ubuntu-qcow2
+    storage_pool: k8s-cluster
+  network:
+    name: k8snet
+    mode: nat
+    domain: k8s.local
+    addresses:
+      - "192.167.56.0/24"
+    autostart: true
+    dns:
+      enabled: true
+      local_only: true
+    dhcp:
+      enabled: true
+iscsi:
+  nodes: 
+    - iscsi-n-1: "192.167.56.15"

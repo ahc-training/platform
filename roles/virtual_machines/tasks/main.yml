@@ -1,0 +1,46 @@
+- name: Clean up known_hosts for ssh
+  ansible.builtin.known_hosts:
+    path: '~/.ssh/known_hosts'
+    state: absent
+    name: "{{ hostvars[item].ansible_host }}"
+  with_items: "{{ groups['all'] }}"
+
+- name: Get terraform.tfstate properties
+  stat:
+    path: "./terraform/terraform.tfstate"
+  register: tf_state
+
+- name: Destroy VMs with Terraform
+  community.general.terraform:
+    project_path: "{{ terraform_path }}"
+    state: absent
+    variables: "{ {{ ', '.join((iscsi_nodes, k8s_controlplanes, k8s_nodes)) }} }"
+  when: tf_state.stat.exists and tf_state.stat.isreg 
+
+- name: Create .ssh directory
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user_id }}/.ssh"
+    state: directory
+    mode: 0700
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_id }}"
+
+- name: Generate SSH key
+  community.crypto.openssh_keypair:
+    path: "~/.ssh/id_rsa"
+    type: rsa
+    size: 4096
+    state: present
+    force: false
+
+- name: Create VMs with Terraform
+  community.general.terraform:
+    project_path: "{{ terraform_path }}"
+    force_init: "{{ not tf_state.stat.exists }}"
+    overwrite_init: true
+    provider_upgrade: true
+    state: present
+    variables: "{ {{ ', '.join((iscsi_nodes, k8s_controlplanes, k8s_nodes)) }} }"
+
+- pause:
+    seconds: 60

@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "spark-app"
+version = "0.1.0"
+description = ""
+authors = ["john doe <arjan.hulshoff@example.com>"]
+readme = "README.md"
+packages = [{include = "spark_app"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+boto3 = "^1.26.34"
+pyspark = "^3.3.1"
+kubernetes-client = "^0.1.7"
+delta-spark = "^2.2.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

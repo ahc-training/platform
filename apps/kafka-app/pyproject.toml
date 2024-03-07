@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "kafka-app"
+version = "0.1.0"
+description = ""
+authors = ["john doe <arjan.hulshoff@example.com>"]
+readme = "README.md"
+packages = [{include = "kafka_app"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+kafka-python = "^2.0.2"
+kubernetes-client = "^0.1.7"
+kubernetes = "^25.3.0"
+faker = "^17.6.0"
+dataclasses-avroschema = "^0.52.1"
+icecream = "^2.1.3"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

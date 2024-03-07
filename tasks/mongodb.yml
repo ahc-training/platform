@@ -1,0 +1,98 @@
+- name: Create namespaces
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: mongodb
+
+- name: Install helm repo
+  kubernetes.core.helm_repository:
+    name: mongodb
+    repo_url: https://mongodb.github.io/helm-charts
+
+- name: Uninstall helm chart
+  kubernetes.core.helm:
+    name: community-operator
+    release_namespace: mongodb
+    state: absent
+
+- name: Install helm chart
+  kubernetes.core.helm:
+    name: community-operator
+    release_namespace: mongodb
+    create_namespace: true
+    update_repo_cache: true
+    chart_ref: mongodb/community-operator
+
+- name: Create MongoDB ReplicaSet
+  kubernetes.core.k8s:
+    state: present
+    namespace: mongodb
+    definition:
+      apiVersion: mongodbcommunity.mongodb.com/v1
+      kind: MongoDBCommunity
+      metadata:
+        name: k8s-mongodb
+        namespace: mongodb
+      spec:
+        members: 3
+        type: ReplicaSet
+        arbiters: 1
+        version: "6.0.5"
+        security:
+          authentication:
+            modes: ["SCRAM"]
+        users:
+          - name: admin
+            db: admin
+            passwordSecretRef:
+              name: user-password
+            roles:
+              - name: clusterAdmin
+                db: admin
+              - name: userAdminAnyDatabase
+                db: admin
+            scramCredentialsSecretName: my-scram
+        additionalMongodConfig:
+          storage.wiredTiger.engineConfig.journalCompressor: zlib
+        volumeClaimTemplates:
+        - metadata:
+            name: data-volume
+          spec:
+            accessModes:
+            - ReadWriteOnce
+            resources:
+              requests:
+                storage: 2G
+            selector:
+              matchLabels:
+                type: data
+            storageClassName: "cstor-csi-disk"
+        - metadata:
+            name: logs-volume
+          spec:
+            accessModes:
+            - ReadWriteOnce
+            resources:
+              requests:
+                storage: 2G
+            selector:
+              matchLabels:
+                type: logs
+            storageClassName: "cstor-csi-disk"
+
+- name: Create MongoDB ReplicaSet
+  kubernetes.core.k8s:
+    state: present
+    namespace: mongodb
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: user-password
+        namspace: mongodb
+      type: Opaque
+      stringData:
+        password: Nosql123!

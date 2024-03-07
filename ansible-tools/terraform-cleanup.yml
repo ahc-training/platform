@@ -1,0 +1,28 @@
+- hosts: 127.0.0.1
+  connection: local
+  become: false
+  vars:
+    terraform_path: '../terraform'
+    iscsi_nodes: "\"iscsi_nodes\": {{ dict(groups['iscsi'] | zip(groups['iscsi'] | map('extract', hostvars, ['ansible_host']))) }}"
+    k8s_controlplanes: "\"k8s_controlplanes\": {{ dict(groups['k8s_controlplane'] | zip(groups['k8s_controlplane'] | map('extract', hostvars, ['ansible_host']))) }}"
+    k8s_nodes: "\"k8s_nodes\": {{ dict(groups['k8s_nodes'] | zip(groups['k8s_nodes'] | map('extract', hostvars, ['ansible_host']))) }}"
+  tasks:
+    - name: Clean up known_hosts for ssh
+      ansible.builtin.known_hosts:
+        path: '~/.ssh/known_hosts'
+        state: absent
+        name: "{{ hostvars[item].ansible_host }}"
+      with_items: "{{ groups['all'] }}"
+
+    - name: Get terraform.tfstate properties
+      stat:
+        path: "../terraform/terraform.tfstate"
+      register: tf_state
+
+    - name: Destroy VMs with Terraform
+      community.general.terraform:
+        project_path: "{{ terraform_path }}"
+        state: absent
+        variables: "{ {{ ', '.join((iscsi_nodes, k8s_controlplanes, k8s_nodes)) }} }"
+      when: tf_state.stat.exists and tf_state.stat.isreg 
+

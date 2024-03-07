@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "streaming-app"
+version = "0.1.0"
+description = ""
+authors = ["john doe <arjan.hulshoff@example.com>"]
+readme = "README.md"
+packages = [{include = "streaming_app"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pyspark = "^3.3.2"
+kubernetes-client = "^0.1.7"
+delta-spark = "^2.2.0"
+kafka-python = "^2.0.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

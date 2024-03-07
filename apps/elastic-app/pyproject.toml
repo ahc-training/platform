@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "elastic-app"
+version = "0.1.0"
+description = ""
+authors = ["john doe <arjan.hulshoff@example.com>"]
+readme = "README.md"
+packages = [{include = "elastic_app"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+kubernetes = "^25.3.0"
+faker = "^16.3.0"
+elasticsearch = "7.17"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

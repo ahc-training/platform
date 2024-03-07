@@ -1,0 +1,117 @@
+- name: "Check if {{ item }} pods are running"
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: "{{ item }}"
+  register: pod_list
+  until: pod_list | json_query("resources[*].status.phase") | unique == ["Running"]
+  retries: 50
+  delay: 10
+  with_items:
+    - postgresql
+
+- name: Retrieve ip address of postgresql
+  kubernetes.core.k8s_info:
+    kind: Service
+    namespace: postgresql
+    name: bitnami-postgresql-postgresql-ha-pgpool
+  register: postgres_svc
+
+- name: Create gogs database
+  community.general.postgresql_db:
+    state: present
+    name: gogs
+    login_host: "{{ postgres_svc | json_query(postgres_qry) }}"
+    port: 5432
+    login_user: "{{ postgres_usr }}"
+    login_password: "{{ postgres_pwd }}"
+  vars:
+    postgres_qry: "resources[0].status.loadBalancer.ingress[0].ip"
+
+- name: Create namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: devops
+
+- name: Create deployment for gogs
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: gogs
+        namespace: devops
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: gogs
+        template:
+          metadata:
+            labels:
+              app: gogs
+              version: v1
+          spec:
+            containers:
+            - name: gogs
+              image: gogs/gogs:0.12.10
+              ports:
+              - containerPort: 22
+                name: ssh
+              - containerPort: 3000
+                name: http
+              env:
+              - name: SOCAT_LINK
+                value: "false"
+              - name: LOCAL_NETWORK_ALLOWLIST
+                value: "*"
+              volumeMounts:
+              - name: gogs-pv-claim
+                mountPath: /data
+        volumeClaimTemplates:
+          - metadata:
+              name: gogs-pv-claim
+              labels:
+                app: gogs
+            spec:
+              accessModes:
+                - ReadWriteOnce
+              volumeMode: Filesystem
+              resources:
+                requests:
+                  storage: 2Gi
+              storageClassName: "cstor-csi-disk"
+
+
+- name: Create service for gogs
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: gogs-svc
+        namespace: devops
+      spec:
+        type: LoadBalancer
+        selector:
+          app: gogs
+        ports:
+        - name: ssh
+          protocol: TCP
+          port: 22
+          targetPort: 22
+        - name: http
+          protocol: TCP
+          port: 80
+          targetPort: 3000
+
+# Install gogs plugin in jenkins
+# Go to 'Settings -> Webhooks' of the repository in gogs
+# Set payload url: http://<ipaddr>:<port>/gogs-webhook/?job=<jenkins_job_name>
+# Make sure that 'Just the push event' is selected 
+# Save webhook

@@ -1,0 +1,40 @@
+- name: Add new repositories keys
+  apt_key:
+    url: "{{ item }}"
+    state: present
+  with_items:
+    - 'https://download.docker.com/linux/ubuntu/gpg'
+
+- name: Add new repositories to sources
+  apt_repository:
+    repo: "deb {{ item }}"
+    state: present
+  with_items:
+    - 'https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable'
+
+- name: "Install container container_runtime: containerd"
+  apt:
+    name: [gnupg2, software-properties-common, containerd.io]
+    state: present
+    update_cache: true
+
+- name: Create /etc/containerd
+  file:
+    state: directory
+    path: /etc/containerd
+
+- name: Create config.toml
+  shell: containerd config default > /etc/containerd/config.toml
+
+- name: Set Cgroup driver to systemd
+  replace:
+    regexp: "SystemdCgroup = false"
+    replace: "SystemdCgroup = true"
+    path: /etc/containerd/config.toml
+
+- name: Start and enable containerd service
+  systemd:
+    name: containerd
+    state: restarted
+    enabled: true
+    daemon_reload: true

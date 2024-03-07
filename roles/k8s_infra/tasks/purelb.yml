@@ -1,0 +1,45 @@
+- name: Change kube-proxy to IPVS mode
+  shell: 'kubectl get configmap kube-proxy -n kube-system -o yaml | sed -e "s/mode: \"\"/mode: \"IPVS\"/" | kubectl apply -f - -n kube-system'
+
+- name: Change kube-proxy to enable strictARP
+  shell: 'kubectl get configmap kube-proxy -n kube-system -o yaml | sed -e "s/strictARP: false/strictARP: true/" | kubectl apply -f - -n kube-system'
+
+- name: Add kernel modules to sysctl
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_set: true
+    reload: true
+  with_items:
+    - {name: "net.ipv4.conf.all.arp_ignore", value: 1}
+    - {name: "net.ipv4.conf.all.arp_announce", value: 2}
+
+- name: Install helm repo
+  kubernetes.core.helm_repository:
+    name: purelb
+    repo_url: "https://gitlab.com/api/v4/projects/20400619/packages/helm/stable"
+
+- name: Install Purelb
+  kubernetes.core.helm:
+    name: purelb
+    release_namespace: purelb-system
+    create_namespace: true
+    update_repo_cache: true
+    chart_ref: purelb/purelb
+
+- name: Configure ServiceGroup
+  kubernetes.core.k8s:
+    state: present
+    namespace: purelb-system
+    definition:
+      apiVersion: purelb.io/v1
+      kind: ServiceGroup
+      metadata:
+        name: default
+      spec:
+        local:
+          v4pool:
+            aggregation: default
+              pool: "{{ ip_range }}"
+              subnet: "{{ ip_range_subnet }}"

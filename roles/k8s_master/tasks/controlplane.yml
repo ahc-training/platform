@@ -1,0 +1,55 @@
+- name: Start and enable kubelet service
+  systemd:
+    name: kubelet
+    state: restarted
+    enabled: true
+
+- name: Initialize kubernetes cluster with single controlplane node
+  command: kubeadm init --pod-network-cidr={{ k8s_cidr_subnet }} --apiserver-advertise-address={{ apiserver_advertise_address }}
+  when: groups['k8s_controlplane'] | length == 1
+
+- name: Initialize kubernetes cluster with multiple controlplane nodes
+  command: kubeadm init --pod-network-cidr={{ k8s_cidr_subnet }} --upload-certs --control-plane-endpoint={{ k8s_cluster_name}}.{{ domain }}
+  when: groups['k8s_controlplane'] | length > 1
+
+- name: Create .kube dir for {{ k8s_admin_user }} user
+  file:
+      path: "/home/{{ k8s_admin_user }}/.kube"
+      state: directory
+
+- name: Copy kube config to {{ k8s_admin_user }} home .kube dir 
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest:  /home/{{ k8s_admin_user }}/.kube/config
+    remote_src: yes
+    owner: "{{ k8s_admin_user }}"
+    group: "{{ k8s_admin_group }}"
+    mode: 0600
+
+- name: Download calico manifests 
+  become: false
+  get_url:
+    url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/{{ item }}"
+    dest: "~/{{ item }}"
+  with_items: "{{ calico_manifests }}"
+
+- name: Install calico pod network plugin from manifests
+  become: false
+  kubernetes.core.k8s:
+    state: present
+    src: "~/{{ item }}" 
+  with_items: "{{ calico_manifests }}"
+
+- name: Download calicoctl
+  get_url:
+    url: https://github.com/projectcalico/calico/releases/download/{{ calico_version }}/calicoctl-linux-amd64
+    dest: /usr/bin/kubectl-calico
+    mode: 0655
+    
+- name: Generate join command
+  command: kubeadm token create --print-join-command
+  register: join_command
+
+- name: Copy join command for {{ k8s_cluster_name }} cluster to local file
+  become: false
+  local_action: copy content="{{ join_command.stdout_lines[0] }}" dest="./{{ k8s_cluster_name }}-join-command"

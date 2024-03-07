@@ -1,0 +1,32 @@
+- hosts: 127.0.0.1
+  connection: local
+  tasks:
+    - name: Permit the use of port 88
+      become: true
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_unprivileged_port_start
+        value: 88
+        sysctl_set: true
+        state: present
+        reload: true
+
+    - name: Remove pgAdmin4 container
+      containers.podman.podman_container:
+        name: pgadmin4
+        state: absent
+    
+    - name: Create pgAdmin4
+      containers.podman.podman_container:
+        name: pgadmin4
+        image: docker.io/dpage/pgadmin4
+        state: started
+        recreate: true
+        restart_policy: always
+        ports:
+          - 88:80
+        env:
+          PGADMIN_DEFAULT_EMAIL: "{{ email }}"
+          PGADMIN_DEFAULT_PASSWORD: vagrant
+          PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: "True"
+          PGADMIN_CONFIG_LOGIN_BANNER: '"Authorised users only!"'
+          PGADMIN_CONFIG_CONSOLE_LOG_LEVEL: 10

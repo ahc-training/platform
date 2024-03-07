@@ -1,0 +1,169 @@
+- hosts: 127.0.0.1
+  connection: local
+  become: true
+  tasks:
+    - name: Add apt keys
+      become: true
+      ansible.builtin.get_url:
+        url: "{{ item.url }}"
+        dest: "/usr/share/keyrings/{{ item.name }}"
+        mode: 0644
+        owner: root
+        group: root
+      with_items:
+        - url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+          name: kubernetes-archive-keyring.gpg
+        - url: https://baltocdn.com/helm/signing.asc
+          name: helm.asc
+        - url: https://apt.releases.hashicorp.com/gpg
+          name: hashicorp-archive-keyring.asc
+
+    - name: Add apt repositories
+      become: true
+      ansible.builtin.apt_repository:
+        state: present
+        repo: "{{ item.repo }}"
+        filename: "{{ item.filename }}"
+      with_items:
+        - repo: "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main"
+          filename: kubernetes
+        - repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/helm.asc] https://baltocdn.com/helm/stable/debian/ all main"
+          filename: helm-stable-debian
+        - repo: "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.asc] https://apt.releases.hashicorp.com {{ ansible_distribution_release }} main"
+          filename: hashicorp
+
+    - name: Install server software (apt)
+      ansible.builtin.apt:
+        state: present
+        name: [bridge-utils, cpu-checker, libvirt-clients, libvirt-daemon, qemu, qemu-kvm, virt-manager,
+               mkisofs, cockpit, cockpit-machines, cockpit-pcp, cockpit-podman, podman, openssh-server, vim,
+               multitail, python3-pip, default-jre, network-manager, unzip, kubectl, helm, gnupg,
+               software-properties-common, terraform, sqlite3, nfs-kernel-server, skopeo, postgresql-client, 
+               python3-psycopg2]
+        update_cache: true
+
+    - name: Install python3 libraries
+      ansible.builtin.pip:
+        name: [kubernetes, pyyaml, psycopg2-binary, podman-compose, poetry]
+
+    - name: Create nfs storage directory
+      ansible.builtin.file:
+        state: directory
+        path: "/opt/{{ item }}"
+        mode: 0777
+        owner: nobody
+        group: nogroup
+      with_items:
+        - k8s_nfs_storage
+        - nfs_dags
+
+    - name: Add config to /etc/exports
+      ansible.builtin.lineinfile:
+        path: /etc/exports
+        state: present
+        line: "/opt/{{ item }} 192.167.56.0/24(rw,sync,no_subtree_check)"
+      with_items:
+        - k8s_nfs_storage
+        - nfs_dags
+
+    - name: Export the nfs share
+      ansible.builtin.shell: exportfs -a
+
+    - name: Restart nfs server
+      ansible.builtin.systemd:
+        state: restarted
+        daemon_reload: true
+        name: nfs-kernel-server
+
+    - name: Download AWS client
+      ansible.builtin.unarchive:
+        src: https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+        dest: "/opt"
+        remote_src: true
+      register: aws_downloaded
+
+    - name: Install AWS client
+      shell: "/opt/aws/install"
+      when: aws_downloaded.changed == true
+
+    - name: Install the newest version of cockpit-machines to solve UEFI issue
+      block:
+        - name: Install required applications to build cockpit-machines
+          ansible.builtin.apt:
+            name: [npm, gettext]
+            update_cache: true
+
+        - name: Clone git repo of cockpit-machines
+          ansible.builtin.git:
+            repo: https://github.com/cockpit-project/cockpit-machines.git
+            dest: "/opt/cockpit-machines"
+            version: HEAD
+
+        - name: Make cockpit-machines
+          community.general.make:
+            chdir: "/opt/cockpit-machines"
+
+        - name: Install cockpit-machines
+          community.general.make:
+            chdir: "/opt/cockpit-machines"
+            target: install
+      when: false
+
+    # - name: Disable keyring for python
+    #   shell: python3 -m keyring --disable
+
+    - name: Change wifi to use NetworkManager as the renderer
+      ansible.builtin.lineinfile:
+        path: /etc/netplan/00-installer-config-wifi.yaml
+        line: "  renderer: NetworkManager"
+        create: true
+        insertafter: "^network:"
+        state: present
+      register: nm_presence
+
+    - name: Apply changes to netplan
+      ansible.builtin.shell: sudo netplan apply
+      async: 60
+      poll: 10
+      when: nm_presence is changed
+
+    - name: Remove SELinux from libvirt
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/libvirt/qemu.conf
+        regex: '^#security_driver = "selinux"$'
+        line: 'security_driver = "none"'
+
+    - name: Create data directory
+      ansible.builtin.file:
+        state: directory
+        path: /data
+
+    - name:
+      ansible.builtin.shell: virsh pool-list --name
+      register: pool_exists
+
+    - block:
+        - name: Define lbvirt storage pool
+          ansible.builtin.shell: "virsh pool-define-as {{ k8s_cluster_name }} dir - - - - /data"
+
+        - name: Build libvirt storage pool
+          ansible.builtin.shell: "virsh pool-build {{ k8s_cluster_name }}"
+
+        - name: Start libvirt storage pool
+          ansible.builtin.shell: "virsh pool-start {{ k8s_cluster_name }}"
+
+        - name: Set autostart on libvirt storage pool
+          ansible.builtin.shell: "virsh pool-autostart {{ k8s_cluster_name }}"
+      when: k8s_cluster_name not in pool_exists.stdout
+
+    - name: Prevent suspend when laptop lid is closed
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/logind.conf
+        regex: "^#HandleLidSwitch=suspend$"
+        line: "HandleLidSwitch=ignore"
+
+    - name: Reboot server
+      become: true
+      ansible.builtin.shell: reboot

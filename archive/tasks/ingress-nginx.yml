@@ -1,0 +1,30 @@
+- name: Install ingress nginx controller
+  hosts: k8s_controlplane
+  tasks:
+
+    - name: Install helm repo
+      kubernetes.core.helm_repository:
+        name: nginx-stable
+        repo_url: https://helm.nginx.com/stable
+
+    - name: Install helm chart
+      kubernetes.core.helm:
+        name: ingress-nginx
+        release_namespace: airflow
+        create_namespace: true
+        update_repo_cache: true
+        chart_ref: nginx-stable/nginx-ingress
+        values:
+          controller:
+            service:
+              create: true
+              type: LoadBalancer
+              annotations:
+                lb.kubesphere.io/v1alpha1: openelb
+                protocol.openelb.kubesphere.io/v1alpha1: layer2
+                eip.openelb.kubesphere.io/v1alpha2: eip-k8s-pool
+              externalTrafficPolicy: Cluster
+              httpPort:
+                enable: true
+                port: 80
+                targetPort: 80

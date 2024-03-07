@@ -1,0 +1,71 @@
+# install kubectl-minio
+# run 'kubectl minio init' (creates operator)
+# change service from ClusterIp to LoadBalancer
+# create minio environment with operator (kubectl minio)
+
+- name: Download and install minio plugin
+  become: true
+  uri:
+      url: 'https://github.com/minio/operator/releases/download/v5.0.4/kubectl-minio_5.0.4_linux_amd64'
+      method: GET
+      dest: /usr/local/bin/kubectl-minio
+      mode: a+x
+  ignore_errors: true
+
+- name: Initialize minio operator
+  ansible.builtin.command: kubectl minio init
+
+- name: Alter minio console service to grant external access
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: console
+        namespace: minio-operator
+      spec:
+        type: LoadBalancer
+
+- name: Create namespace for minio tenant
+  ansible.builtin.k8s:
+    state: present
+    namespace: default
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: minio-data
+
+- name: Create minio tenant
+  ansible.builtin.command: |
+    kubectl minio tenant create minio-data \
+      --servers 2 \
+      --volumes 4 \
+      --capacity 100Gi \
+      --namespace minio-data \
+      --storage-class cstor-csi-disk \
+      --disable-tls \
+      --expose-console-service \
+      --expose-minio-service
+  ignore_errors: true
+
+- name: Get credentials
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: minio-data-user-1
+    namespace: minio-data
+  register: minio_cred
+
+- ansible.builtin.set_fact:
+    creds: "{{ lookup('ansible.utils.get_path', minio_cred, 'resources[0].data') }}"
+
+- ansible.builtin.set_fact:
+    creds: "{{ creds | combine(new_item, recursive=true) }}"
+  vars:
+    new_item: "{ '{{ item.key }}': '{{ item.value | b64decode }}' }"
+  with_dict: "{{ creds }}"
+
+- name: Store the output of creating the minio tenant
+  become: false
+  local_action: copy content="{{ creds | to_json }}" dest="{{ inventory_dir }}/minio_credentials.json"

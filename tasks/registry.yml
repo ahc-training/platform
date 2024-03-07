@@ -1,0 +1,140 @@
+- name: Create namespaces
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: devops
+
+- name: Create directory
+  become: true
+  ansible.builtin.file:
+    state: directory
+    path: /registry/auth
+    mode: 0755
+    group: users
+    owner: vagrant
+
+- name: Create htpasswd for private secure registry
+  become: true
+  htpasswd:
+    path: /registry/auth/htpasswd
+    crypt_scheme: bcrypt
+    name: vagrant
+    password: vagrant
+    mode: 0644
+    group: users
+    owner: vagrant
+
+- name: Get content from htpasswd
+  ansible.builtin.slurp:
+    src: "/registry/auth/htpasswd"
+  register: htpasswd_content
+
+- name: Create htpasswd secret on k8s
+  kubernetes.core.k8s:
+    state: present
+    namespace: devops
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: auth-secret
+      type: Opaque
+      data:
+        htpasswd: "{{ htpasswd_content.content }}"
+
+- name: Create registry statefulset
+  kubernetes.core.k8s:
+    state: present
+    namespace: devops
+    definition:
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: registry
+        labels:
+          app: registry
+        namespace: devops
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: docker-registry
+        template:
+          metadata:
+            labels:
+              app: docker-registry
+          spec:
+            securityContext:
+              fsGroup: 1000
+              runAsUser: 1000
+            containers:
+              - name: registry
+                image: registry:latest
+                volumeMounts:
+                  - name: registry-volume-claim
+                    mountPath: "/var/lib/registry"
+                  - name: certs-vol
+                    mountPath: "/certs"
+                    readOnly: true
+                  - name: auth-vol
+                    mountPath: "/auth"
+                    readOnly: true
+                env:
+                  - name: REGISTRY_AUTH
+                    value: "htpasswd"
+                  - name: REGISTRY_AUTH_HTPASSWD_REALM
+                    value: "Registry Realm"
+                  - name: REGISTRY_AUTH_HTPASSWD_PATH
+                    value: "/auth/htpasswd"
+                  - name: REGISTRY_HTTP_TLS_CERTIFICATE
+                    value: "/certs/tls.crt"
+                  - name: REGISTRY_HTTP_TLS_KEY
+                    value: "/certs/tls.key"
+                  - name: REGISTRY_HTTP_SECRET
+                    value: "demo_project"
+                  - name: REGISTRY_STORAGE_DELETE_ENABLED
+                    value: "true"
+            volumes:
+              - name: certs-vol
+                secret:
+                  secretName: certs-secret
+              - name: auth-vol
+                secret:
+                  secretName: auth-secret
+        volumeClaimTemplates:
+          - metadata: 
+              name: registry-volume-claim
+            spec:
+              accessModes:
+                - ReadWriteOnce
+              resources:
+                requests:
+                  storage: 10Gi
+              storageClassName: "cstor-csi-disk"
+
+
+- name: Create service for registry pod
+  kubernetes.core.k8s:
+    state: present
+    namespace: devops
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: registry
+        annotations:
+          lb.kubesphere.io/v1alpha1: openelb
+          protocol.openelb.kubesphere.io/v1alpha1: layer2
+          eip.openelb.kubesphere.io/v1alpha2: eip-k8s-pool
+      spec:
+        selector:
+          app: docker-registry
+        type: LoadBalancer
+        ports:
+          - name: registry-port
+            port: 5000
+            targetPort: 5000
+        externalTrafficPolicy: Cluster

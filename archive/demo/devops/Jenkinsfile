@@ -1,0 +1,31 @@
+// https://itnext.io/jenkins-k8s-building-docker-image-without-docker-d41cffdbda5a
+// https://plugins.jenkins.io/kubernetes/
+// https://plugins.jenkins.io/gogs-webhook/
+
+registry="registry.example.com:5000"
+name="custom-pyspark"
+tag="latest"
+image="${registry}/${name}:${tag}"
+
+podTemplate(label: 'docker-image-pod', cloud: 'kubernetes',
+    containers: [
+        containerTemplate(name: 'buildkit', image: 'moby/buildkit:master', ttyEnabled: true, privileged: true)
+    ],
+    volumes: [
+        secretVolume(secretName: 'docker-config', mountPath: '/root/.docker')
+    ]) {
+        node('docker-image-pod') {
+            stage('Prepare') {
+                checkout scm
+            }
+
+            stage('Build & push image') {
+                container('buildkit') {
+                    sh """
+                        buildctl build --frontend dockerfile.v0 --local context=./devops/ --local dockerfile=./devops/ --output type=image,name=${image},push=true
+                    """
+                    // 
+                }
+            }
+        }
+    }

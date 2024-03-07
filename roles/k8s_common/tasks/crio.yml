@@ -1,0 +1,35 @@
+- name: Add new repositories keys
+  apt_key:
+    url: "{{ item }}"
+    state: present
+  with_items:
+    - 'https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/{{ crio_version }}/{{ crio_os_version }}/Release.key'
+    - 'https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/{{ crio_os_version }}/Release.key'
+
+- name: Add new repositories to sources
+  apt_repository:
+    repo: "deb {{ item }}"
+    state: present
+  with_items:
+    - 'https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/{{ crio_os_version }}/ /'
+    - 'https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/{{ crio_version }}/{{ crio_os_version }}/ /'
+
+- name: "Install container container_runtime: CRI-O"
+  apt:
+    name: [cri-o, cri-o-runc]
+    state: present
+    update_cache: true
+    
+- name: Update CRI-O CIDR subnet
+  replace:
+    path: /etc/cni/net.d/100-crio-bridge.conflist
+    regexp: "10.85.0.0/16"
+    replace: "{{ k8s_cidr_subnet }}"
+    backup: true
+
+- name: Start and enable CRI-O service
+  systemd:
+    name: crio
+    state: restarted
+    enabled: true
+    daemon_reload: true

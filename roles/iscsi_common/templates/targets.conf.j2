@@ -1,0 +1,10 @@
+default-driver iscsi
+
+{% for item in zfs_targets %}
+<target {{ item.lun }}>
+    backing-store /dev/iscsi/{{ item.name }}
+    initiator-address {{ item.initiator }}
+    incominguser vagrant vagrant
+</target>
+
+{% endfor %}

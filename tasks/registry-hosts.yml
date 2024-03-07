@@ -1,0 +1,41 @@
+- name: Retrieve ip address of Docker registry
+  kubernetes.core.k8s_info:
+    kind: Service
+    namespace: devops
+    name: registry
+  register: registry_svc
+  when: inventory_hostname in groups['k8s_controlplane']
+  until: (registry_svc | json_query("resources[0].status.loadBalancer.ingress[1].ip")) is defined
+  retries: 5
+  delay: 5
+
+- name: Get ip address of registry
+  ansible.builtin.set_fact:
+    registry_ip: "{{ registry_svc | json_query(registry_qry) }}"
+  vars:
+    registry_qry: "resources[0].status.loadBalancer.ingress[0].ip"
+  when: inventory_hostname in groups['k8s_controlplane']
+
+- name: Add ip and hostname to /etc/hosts
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    line: "{{ hostvars[groups['k8s_controlplane'][0]].registry_ip }}  {{ domain }}  registry.{{ domain }}"
+
+- block:
+    - name: "Remove old entry in {{ hosts_path }}"
+      ansible.builtin.lineinfile:
+        state: absent
+        path: "{{ hosts_path }}"
+        regexp: "registry.{{ domain }}"
+      
+    - name: "Add ip and hostname to {{ hosts_path }} on localhost"
+      ansible.builtin.lineinfile:
+        path: "{{ hosts_path }}"
+        line: "{{ hostvars[groups['k8s_controlplane'][0]].registry_ip }}  {{ domain }}  registry.{{ domain }}"
+  vars:
+    hosts_path: /etc/hosts
+  when: inventory_hostname == (groups['k8s_controlplane'][0])
+  become: true
+  delegate_to: localhost
+  delegate_facts: true

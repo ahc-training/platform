@@ -1,0 +1,51 @@
+all:
+    children:
+        k8s:
+            children:
+                k8s_controlplane:
+                    hosts:
+                        k8s-cp-1: 
+                            ansible_host: 192.167.56.11
+                    vars:
+                        # Options: openelb / metallb / purelb
+                        lb_type: "openelb"
+                        ip_range: 192.167.56.91-192.167.56.140
+                        ip_range_subnet: 192.167.56.0/24
+                        vm_gateway: 192.167.56.1
+                        calico_version: "v3.24.5"
+                        registry_ip: 192.167.56.0
+                k8s_nodes:
+                    hosts:
+                        k8s-n-1: 
+                            ansible_host: 192.167.56.12
+                        k8s-n-2: 
+                            ansible_host: 192.167.56.13
+                    vars:
+                        iscsi_host: iscsi-n-1
+            vars:
+                k8s_admin_user: "vagrant"
+                k8s_admin_group: "vagrant"
+                k8s_node_public_ip: "192.167.56.11"
+                crio_version: 1.27
+                crio_os_version: "xUbuntu_20.04"
+                k8s_distro_release: kubernetes-xenial
+                # Options: crio / containerd
+                container_runtime: "crio"
+                k8s_cidr_subnet: "192.168.0.0/16"
+
+        iscsi:
+            hosts:
+                iscsi-n-1:
+                    ansible_host: 192.167.56.15
+    vars:
+        timezone: Europe/Amsterdam
+        k8s_cluster_name: "k8s-cluster"
+        domain: example.com
+        email: john.doe@example.com
+        ubuntu_version_vm: "20.04"
+        airflow_image_name: custom-airflow
+        airflow_image_tag: 2.7.2
+        spark_image_name: custom-pyspark
+        spark_image_tag: v3.4.0
+        postgres_usr: "postgres"
+        postgres_pwd: "Sql123!"

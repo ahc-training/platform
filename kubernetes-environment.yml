@@ -1,0 +1,82 @@
+- hosts: 127.0.0.1
+  connection: local
+  become: false
+  roles:
+    - role: virtual_machines
+
+- hosts: all
+  become: true
+  tasks:
+    - name: Set hostname
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname }}"
+
+    - name: Install software
+      ansible.builtin.apt:
+        # name: [qemu-guest-agent, cockpit, cockpit-pcp, network-manager]
+        name: [qemu-guest-agent]
+        update_cache: true
+        state: present
+
+    - name: Enable qemu-guest-agent
+      ansible.builtin.systemd:
+        name: qemu-guest-agent
+        state: restarted
+        enabled: true
+
+- hosts: iscsi
+  become: true
+  roles:
+    - role: iscsi_common
+
+- hosts: k8s_controlplane
+  become: true
+  roles:
+    - role: k8s_common
+    - role: k8s_master
+      vars:
+        apiserver_advertise_address: "{{ hostvars[inventory_hostname]['ansible_host'] }}"
+
+- hosts: k8s_nodes
+  become: true
+  roles:
+    - role: k8s_common
+    - role: k8s_node
+
+- name: Installing applications
+  tags: Installing_applications
+  hosts: k8s
+  roles:
+    - role: k8s_infra
+      when: inventory_hostname == (groups['k8s_controlplane'][0])
+  tasks:
+    - name: Install standard applications
+      ansible.builtin.include_tasks: "./tasks/{{ item }}.yml"
+      when: inventory_hostname == (groups['k8s_controlplane'][0])
+      with_items:
+        - portainer-server
+        - portainer-agent
+        - monitoring
+        # - metrics-server
+      ignore_errors: true
+
+    - name: Install jenkins
+      ansible.builtin.include_tasks: ./tasks/jenkins.yml
+      when: inventory_hostname == (groups['k8s_controlplane'][0])
+      ignore_errors: true
+
+    - block:
+        - name: Create k8s_certbot for docker registry
+          ansible.builtin.include_tasks: ./tasks/registry-podman.yml
+          when: inventory_hostname == (groups['k8s_controlplane'][0])
+          vars:
+            image_name: k8s_certbot
+            image_tag: latest
+
+        - name: Install docker registry
+          ansible.builtin.include_tasks: ./tasks/registry.yml
+          when: inventory_hostname == (groups['k8s_controlplane'][0])
+
+        - name: Add docker registry external ip to hosts files
+          ansible.builtin.include_tasks: ./tasks/registry-hosts.yml
+      ignore_errors: true

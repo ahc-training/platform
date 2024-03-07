@@ -1,0 +1,167 @@
+- name: Create namespace for spark cluster
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: spark
+
+- name: Create git configmap
+  kubernetes.core.k8s:
+    state: present
+    namespace: spark
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: git-config
+      data:
+        branch: main
+        period: 5s
+        repository: http://nas.example.com:3000/training/applications.git
+        root: /tmp/git
+        username: sa_k8s
+
+- name: Create git secret
+  kubernetes.core.k8s:
+    state: present
+    namespace: spark
+    definition:
+      apiVersion: v1
+      metadata:
+        name: git-secret
+      kind: Secret
+      type: Opaque
+      data:
+        password: dmFncmFudAo=
+
+- name: Install helm repo
+  kubernetes.core.helm_repository:
+    name: bitnami
+    repo_url: https://charts.bitnami.com/bitnami
+
+- name: Uninstall helm chart
+  kubernetes.core.helm:
+    name: spark
+    release_namespace: spark
+    state: absent
+
+- name: Install helm chart
+  kubernetes.core.helm:
+    name: spark
+    release_namespace: spark
+    create_namespace: true
+    update_repo_cache: true
+    chart_ref: bitnami/spark
+    values: 
+      master:
+        extraVolumes:
+          - name: git-repo
+            emptyDir: {}
+        extraVolumeMounts:
+          - name: git-repo
+            mountPath: /tmp/git
+        sidecars:
+          - name: git-sync
+            image: registry.k8s.io/git-sync/git-sync:v4.0.0
+            imagePullPolicy: Always
+            volumeMounts:
+            - name: git-repo
+              mountPath: /tmp/git
+            env:
+            - name: GITSYNC_REPO
+              valueFrom:
+                configMapKeyRef:
+                  name: git-config
+                  key: repository
+            - name: GITSYNC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: git-secret
+                  key: password
+            - name: GITSYNC_PERIOD
+              valueFrom:
+                configMapKeyRef:
+                  name: git-config
+                  key: period
+            - name: GITSYNC_REF
+              valueFrom:
+                configMapKeyRef:
+                  name: git-config
+                  key: branch
+            - name: GITSYNC_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: git-config
+                  key: username
+            - name: GITSYNC_ONE_TIME
+              value: "false"
+            - name: GITSYNC_ROOT
+              valueFrom:
+                configMapKeyRef:
+                  name: git-config
+                  key: root
+            - name: GITSYNC_LINK
+              value: git-sync             
+      worker:
+        memoryLimit: 1G
+        coreLimit: 1
+        dir: /tmp/git
+        extraVolumes:
+          - name: git-repo
+            emptyDir: {}
+        extraVolumeMounts:
+          - name: git-repo
+            mountPath: /tmp/git
+        sidecars:
+          - name: git-sync
+            image: registry.k8s.io/git-sync/git-sync:v4.0.0
+            imagePullPolicy: Always
+            volumeMounts:
+            - name: git-repo
+              mountPath: /tmp/git
+            env:
+            - name: GITSYNC_REPO
+              valueFrom:
+                configMapKeyRef:
+                  name: git-config
+                  key: repository
+            - name: GITSYNC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: git-secret
+                  key: password
+            - name: GITSYNC_PERIOD
+              valueFrom:
+                configMapKeyRef:
+                  name: git-config
+                  key: period
+            - name: GITSYNC_REF
+              valueFrom:
+                configMapKeyRef:
+                  name: git-config
+                  key: branch
+            - name: GITSYNC_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: git-config
+                  key: username
+            - name: GITSYNC_ONE_TIME
+              value: "false"
+            - name: GITSYNC_ROOT
+              valueFrom:
+                configMapKeyRef:
+                  name: git-config
+                  key: root
+            - name: GITSYNC_LINK
+              value: git-sync
+        autoscaling:
+          enabled: true
+          minReplicas: 2
+          maxReplicas: 8
+          targetCPU: 50
+          targetMemory: 50
+        service:
+          type: LoadBalancer
+

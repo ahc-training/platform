@@ -1,0 +1,216 @@
+# - name: Install helm repo
+#   kubernetes.core.helm_repository:
+#     name: bitnami
+#     repo_url: https://charts.bitnami.com/bitnami
+
+# - name: Uninstall helm chart
+#   kubernetes.core.helm:
+#     name: kafka
+#     release_namespace: kafka
+#     state: absent
+
+# - name: Delete namespace
+#   kubernetes.core.k8s:
+#     state: absent
+#     namespace: kafka
+#     definition:
+#       apiVersion: v1
+#       kind: Namespace
+#       metadata:
+#         name: kafka
+#     wait: true
+
+# - name: Install helm chart
+#   kubernetes.core.helm:
+#     name: kafka
+#     release_namespace: kafka
+#     create_namespace: true
+#     update_repo_cache: true
+#     chart_ref: bitnami/kafka
+#     values: 
+#       global:
+#         storageClass: "cstor-csi-disk"
+#       service:
+#         type: LoadBalancer
+#       # persistence:
+#       #   size: 2Gi
+#       # logPersistence:
+#       #   enabled: true
+#       #   size: 2Gi
+#       # zookeeper:
+#       #   replicaCount: 2
+#       #   persistence:
+#       #     storageClass: "cstor-csi-disk"
+#       externalAccess:
+#         enabled: true
+#         autoDiscovery:
+#           enabled: true
+#       serviceAccount:
+#         create: true
+#       rbac:
+#         create: true
+#       metrics:
+#         kafka:
+#           enabled: false
+#       sasl:
+#         client:
+#           users:
+#             - "{{ k8s_admin_user }}"
+#           passwords:
+#             - "{{ k8s_admin_user }}"
+#       controller:
+#         replicaCount: 2
+#         persistence:
+#           size: 2Gi
+
+- name: Create namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: kafka
+
+- name: Create docker auth
+  ansible.builtin.set_fact: 
+    encoded_auth: "{{ (k8s_admin_user ~ ':' ~ k8s_admin_user) | b64encode }}"
+
+- name: Set docker config
+  ansible.builtin.set_fact:
+    dockerconfigjson: |
+          {
+            "auths": {
+              "registry.{{ domain }}:5000": {
+                "username": "{{ k8s_admin_user }}",
+                "password": "{{ k8s_admin_user }}",
+                "email": "{{ email }}",
+                "auth": "{{ encoded_auth }}"
+              }
+            }
+          }
+
+- name: Generate docker registry secret
+  kubernetes.core.k8s:
+    state: present
+    namespace: kafka
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: kubernetes.io/dockerconfigjson
+      metadata:
+        name: regcred
+        namespace: kafka
+      data:
+        .dockerconfigjson: "{{ dockerconfigjson | to_json | b64encode }}"
+  
+- name: Ctreate kafka configmap
+  kubernetes.core.k8s:
+    state: present
+    namespace: kafka
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: kafka-config
+        namespace: kafka
+      data:
+        replicas: "3"
+        service: kafka-svc
+        namespace: kafka
+        share_dir: /mnt/kafka
+        cluster_id: "{{ (9999999999999999999999 | random | to_uuid | replace('-', '') | b64encode | replace('=',''))[0:22] }}"
+
+- name: Create kafka service
+  kubernetes.core.k8s:
+    state: present
+    namespace: kafka
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: kafka-svc
+        labels:
+          app: kafka-app
+      spec:
+        type: LoadBalancer
+        ports:
+          - name: '9092'
+            port: 9092
+            protocol: TCP
+            targetPort: 9092
+        selector:
+          app: kafka-app
+
+- name: Create kafka statefulset
+  kubernetes.core.k8s:
+    state: present
+    namespace: kafka
+    definition:
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: kafka
+        namespace: kafka
+        labels:
+          app: kafka-app
+      spec:
+        serviceName: kafka-svc
+        replicas: 3
+        selector:
+          matchLabels:
+            app: kafka-app
+        template:
+          metadata:
+            namespace: kafka
+            labels:
+              app: kafka-app
+          spec:
+            containers:
+              - name: kafka-container
+                image: "registry.{{ domain }}:5000/custom-kafka:latest"
+                imagePullPolicy: Always
+                ports:
+                  - containerPort: 9092
+                  - containerPort: 9093
+                env:
+                  - name: REPLICAS
+                    valueFrom:
+                      configMapKeyRef:
+                        name: kafka-config
+                        key: replicas
+                  - name: SERVICE
+                    valueFrom:
+                      configMapKeyRef:
+                        name: kafka-config
+                        key: service
+                  - name: NAMESPACE
+                    valueFrom:
+                      configMapKeyRef:
+                        name: kafka-config
+                        key: namespace
+                  - name: SHARE_DIR
+                    valueFrom:
+                      configMapKeyRef:
+                        name: kafka-config
+                        key: share_dir
+                  - name: CLUSTER_ID
+                    valueFrom:
+                      configMapKeyRef:
+                        name: kafka-config
+                        key: cluster_id
+                volumeMounts:
+                  - name: data
+                    mountPath: /mnt/kafka
+            imagePullSecrets:
+              - name: regcred
+        volumeClaimTemplates:
+          - metadata:
+              name: data
+            spec:
+              accessModes:
+                - "ReadWriteOnce"
+              storageClassName: "cstor-csi-disk"
+              resources:
+                requests:
+                  storage: "1Gi"

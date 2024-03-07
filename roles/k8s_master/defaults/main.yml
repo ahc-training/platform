@@ -1,0 +1,3 @@
+calico_manifests:
+  - 'tigera-operator.yaml'
+  - 'custom-resources.yaml'

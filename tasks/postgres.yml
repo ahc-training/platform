@@ -1,0 +1,44 @@
+- name: Get an existing Service object
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Namespace
+    name: postgresql
+  register: ns
+
+- block:
+    - name: Install helm repo
+      kubernetes.core.helm_repository:
+        name: bitnami
+        repo_url: https://charts.bitnami.com/bitnami
+
+    - name: Install helm chart
+      kubernetes.core.helm:
+        name: k8s-pgsql
+        release_namespace: postgresql
+        create_namespace: true
+        update_repo_cache: true
+        chart_ref: bitnami/postgresql-ha
+        values:
+          global:
+            storageClass: "cstor-csi-disk"   
+            postgresql:
+              username: "{{ postgres_usr }}"         
+              password: "{{ postgres_pwd }}"
+          primary:
+              extendedConfiguration: |
+                  max_connections = 200
+          service:
+            type: LoadBalancer
+            annotations:
+              lb.kubesphere.io/v1alpha1: openelb
+              protocol.openelb.kubesphere.io/v1alpha1: layer2
+              eip.openelb.kubesphere.io/v1alpha2: eip-k8s-pool
+            externalTrafficPolicy: Cluster
+          volumePermissions:
+            enabled: true
+          persistence:
+            size: 2Gi
+  when: (ns is not defined) or (ns == None) or (ns.resources | length == 0)
+
+
+

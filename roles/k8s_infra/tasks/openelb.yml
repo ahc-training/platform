@@ -1,0 +1,87 @@
+- name: Install helm repo
+  kubernetes.core.helm_repository:
+    name: openelb
+    repo_url: "https://charts.kubesphere.io/test"
+
+- name: Install OpenELB
+  kubernetes.core.helm:
+    name: openelb
+    release_namespace: openelb-system
+    create_namespace: true
+    update_repo_cache: true
+    chart_ref: openelb/openelb
+
+- name: Check if openelb-manager pods are running
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: openelb-system
+  register: pod_list
+  until: pod_list | json_query("resources[?starts_with(metadata.name, 'openelb-manager')].status.phase") | unique == ["Running"]
+  retries: 200
+  delay: 10
+
+## The following has to be adjusted in the kubernetes deployment of openelb. After that the openelb-manager has to be delete.
+## This causes kubernetes to recreate the openelb-manager with the correct settings. (This has to happen until the helm chart
+## is adjusted)
+#
+# securityContext:
+#   capabilities:
+#     add:
+#     - NET_ADMIN
+#     - SYS_TIME
+#     - NET_RAW
+#     - NET_BIND_SERVICE
+#
+## Begin of patch
+- name: Patch openelb deployment
+  kubernetes.core.k8s_json_patch:
+    kind: Deployment
+    namespace: openelb-system
+    name: openelb-manager
+    patch:
+      - op: add
+        path: "/spec/template/spec/containers/0/securityContext/capabilities/add/{{ item.id }}"
+        value: "{{ item.value }}"
+  with_items:
+    - {id: 2, value: NET_RAW}
+    - {id: 3, value: NET_BIND_SERVICE}
+
+- name: Delete openelb-manager pods
+  kubernetes.core.k8s:
+    state: absent
+    kind: Pod
+    namespace: openelb-system
+    name: "{{ item }}"
+  with_items: pod_list | json_query("resources[?starts_with(metadata.name, 'openelb-manager')].metadata.name")
+
+- name: Check if openelb-manager pods are running
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: openelb-system
+  register: pod_list
+  until: pod_list | json_query("resources[?starts_with(metadata.name, 'openelb-manager')].status.phase") | unique == ["Running"]
+  retries: 50
+  delay: 10
+## End of patch
+
+- name: Give the OpenELB api time to start up
+  pause:
+    seconds: 30
+
+- name: Create OpenELB EIP
+  kubernetes.core.k8s:
+    state: present
+    namespace: openelb-system
+    definition:
+      apiVersion: network.kubesphere.io/v1alpha2
+      kind: Eip
+      metadata:
+          name: eip-k8s-pool
+          annotations:
+            eip.openelb.kubesphere.io/is-default-eip: "true"
+      spec:
+          address: "{{ ip_range }}"
+          protocol: layer2
+          interface: "can_reach:{{ vm_gateway }}"
+          disable: false
+

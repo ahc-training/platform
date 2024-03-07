@@ -1,0 +1,8 @@
+{
+    "aws_endpoint_url": "k8s://kubernetes.default.svc:443",
+    "aws_access_key": "v3K4hFvHpFThdlON",
+    "aws_secret_key": "8Sl9bWjs9UB7NAnKs9Mcf8B0sGnK4P7o",
+    "pgsql_connstr": "jdbc:postgresql://bitnami-postgresql-postgresql-ha-pgpool.postgresql.svc.cluster.local:5432/dvdrental",
+    "pgsql_usr": "postgres",
+    "pgsql_pwd": "Sql123!"
+}

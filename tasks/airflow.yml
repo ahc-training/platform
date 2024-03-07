@@ -1,0 +1,216 @@
+- name: "Check if depending pods are running"
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: "{{ app }}"
+  register: pod_list
+  until: pod_list | json_query("resources[*].status.phase") | unique == ["Running"]
+  retries: 50
+  delay: 10
+  loop:
+    - postgresql
+    - redis
+  loop_control:
+    loop_var: app
+
+- name: Get an existing Service object
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Namespace
+    name: redis
+  register: ns_redis
+
+- name: Get an existing Service object
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Namespace
+    name: postgresql
+  register: ns_postgresql
+
+- block:
+    - name: Retrieve ip address of postgresql
+      kubernetes.core.k8s_info:
+        kind: Service
+        namespace: postgresql
+        name: k8s-pgsql-postgresql-ha-pgpool
+      register: postgres_svc
+
+    - name: Test postgresql
+      community.postgresql.postgresql_ping:
+        db: postgres
+        login_host: "{{ postgres_svc | json_query(postgres_qry) }}"
+        port: 5432
+        login_user: "{{ postgres_usr }}"
+        login_password: "{{ postgres_pwd }}"
+      delegate_to: 127.0.0.1
+      register: pg_result
+      until: pg_result.is_available == true
+      retries: 50
+      delay: 2
+      vars:
+        postgres_qry: "resources[0].status.loadBalancer.ingress[0].ip"
+
+    - name: Create airflow database
+      community.general.postgresql_db:
+        state: present
+        name: airflow
+        login_host: "{{ postgres_svc | json_query(postgres_qry) }}"
+        port: 5432
+        login_user: "{{ postgres_usr }}"
+        login_password: "{{ postgres_pwd }}"
+      vars:
+        postgres_qry: "resources[0].status.loadBalancer.ingress[0].ip"
+
+    - name: Install helm repo
+      kubernetes.core.helm_repository:
+        name: apache-airflow
+        repo_url: https://airflow.apache.org
+      
+    - name: Uninstall helm chart
+      kubernetes.core.helm:
+        name: airflow
+        release_namespace: airflow
+        state: absent
+
+    - name: Delete namespace
+      kubernetes.core.k8s:
+        state: absent
+        namespace: airflow
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: airflow
+        wait: true
+
+    - name: Create namespaces
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: airflow
+
+    - name: Add github credentials
+      kubernetes.core.k8s:
+        state: present
+        namespace: airflow
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: git-credentials
+          data:
+            GIT_SYNC_USERNAME: "{{ git_usr | b64encode }}"
+            GIT_SYNC_PASSWORD: "{{ git_pwd | b64encode }}"
+            GITSYNC_USERNAME: "{{ git_usr | b64encode }}"
+            GITSYNC_PASSWORD: "{{ git_pwd | b64encode }}"
+
+    - name: Add database credentials
+      kubernetes.core.k8s:
+        state: present
+        namespace: airflow
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: airflow-database
+          data:
+            connection: "{{ ('postgresql://' + postgres_usr + ':' + postgres_pwd + '@k8s-pgsql-postgresql-ha-pgpool.postgresql.svc.cluster.local:5432/airflow') | b64encode }}"
+
+    - name: Add database webserver secret key
+      kubernetes.core.k8s:
+        state: present
+        namespace: airflow
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: webserver-key
+          data:
+            webserver-secret-key: "{{ '7d32b3661c702b1c7c59d36869e97fa5' | b64encode }}"
+
+    - name: Add Fernet key
+      kubernetes.core.k8s:
+        state: present
+        namespace: airflow
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: fernet-key
+          data:
+            fernet-key: "{{ 'ATsJ4dvqpU6eghbXxyaNFe9ezBmLll6chw_D_OGeFeQ=' | b64encode }}"
+
+    - name: Install helm chart
+      kubernetes.core.helm:
+        name: airflow
+        release_namespace: airflow
+        create_namespace: true
+        update_repo_cache: true
+        chart_ref: apache-airflow/airflow
+        chart_version: 1.13.0
+        values:
+          # ingress:
+          #   web:
+          #     enabled: true
+          #     path: "/airflow-ui"
+          useStandardNaming: True
+          images:
+            migrationsWaitTimeout: 180
+            airflow:
+              repository: "{{ domain }}:5000/{{ airflow_image_name }}"
+              tag: "latest"
+              pullPolicy: Always
+          workers:
+            replicas: 2
+            persistence:
+              size: 2Gi
+              storageClassName: cstor-csi-disk
+          webserver:
+            service:
+              type: LoadBalancer
+              annotations:
+                lb.kubesphere.io/v1alpha1: openelb
+                protocol.openelb.kubesphere.io/v1alpha1: layer2
+                eip.openelb.kubesphere.io/v1alpha1: eip-k8s-pool
+          registry:
+            connection:
+              user: "{{ k8s_admin_user }}"
+              pass: "{{ k8s_admin_user }}"
+              host: "{{ domain }}:5000"
+              email: "{{ email }}"
+          fernetKeySecretName: fernet-key
+          redis:
+            enabled: false
+          postgresql:
+            enabled: false
+          data:
+            metadataSecretName: airflow-database
+            brokerUrl: 'redis://redis-redis-cluster.redis.svc.cluster.local:6379/0'
+          webserverSecretKeySecretName: webserver-key
+          logs:
+            persistence:
+              enabled: true
+              size: 2Gi
+              storageClassName: nfs-client
+          dags:
+            persistence:
+              enabled: false
+            gitSync:
+              enabled: true
+              repo: "{{ git_repo }}"
+              branch: "{{ git_branch }}"
+              subPath: "{{ dags_dir }}"
+              rev: HEAD
+              depth: 1
+              credentialsSecret: git-credentials
+          cleanup:
+            enabled: true
+          executor: KubernetesExecutor
+          pgbouncer:
+            enabled: true
+          extraEnvVars:
+            - name: AIRFLOW__API__AUTH_BACKEND
+              value: airflow.contrib.auth.backends.password_auth
+  when: (ns_redis.resources | length > 0) and (ns_postgresql.resources | length > 0)

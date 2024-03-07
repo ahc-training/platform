@@ -1,0 +1,110 @@
+- name: Install portainer namespace
+  kubernetes.core.k8s:
+    state: present
+    namespace: default
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: devops
+
+- name: Install portainer service account
+  kubernetes.core.k8s:
+    state: present
+    namespace: portainer
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: portainer-sa-clusteradmin
+        namespace: devops
+
+- name: Install portainer cluster role binding
+  kubernetes.core.k8s:
+    state: present
+    namespace: devops
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: portainer-crb-clusteradmin
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: cluster-admin
+      subjects:
+      - kind: ServiceAccount
+        name: portainer-sa-clusteradmin
+        namespace: portainer
+
+- name: Install portainer service
+  kubernetes.core.k8s:
+    state: present
+    namespace: devops
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: portainer-agent
+        namespace: devops
+      spec:
+        type: LoadBalancer
+        selector:
+          app: portainer-agent
+        ports:
+          - name: http
+            protocol: TCP
+            port: 9001
+            targetPort: 9001
+
+- name: Install portainer service (headless)
+  kubernetes.core.k8s:
+    state: present
+    namespace: devops
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: portainer-agent-headless
+        namespace: devops
+      spec:
+        clusterIP: None
+        selector:
+          app: portainer-agent
+
+- name: Install portainer deployment
+  kubernetes.core.k8s:
+    state: present
+    namespace: devops
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: portainer-agent
+        namespace: devops
+      spec:
+        selector:
+          matchLabels:
+            app: portainer-agent
+        template:
+          metadata:
+            labels:
+              app: portainer-agent
+          spec:
+            serviceAccountName: portainer-sa-clusteradmin
+            containers:
+            - name: portainer-agent
+              image: portainer/agent:latest
+              imagePullPolicy: Always
+              env:
+              - name: LOG_LEVEL
+                value: INFO
+              - name: AGENT_CLUSTER_ADDR
+                value: "portainer-agent-headless"
+              - name: KUBERNETES_POD_IP
+                valueFrom:
+                  fieldRef:
+                    fieldPath: status.podIP
+              ports:
+              - containerPort: 9001
+                protocol: TCP

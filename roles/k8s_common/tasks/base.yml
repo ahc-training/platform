@@ -1,0 +1,68 @@
+- name: Remove current swaps from fstab
+  lineinfile:
+    dest: /etc/fstab
+    regexp: '^/[\S]+\s+none\s+swap '
+    state: absent
+
+- name: Disable swap
+  command: swapoff -a
+  when: ansible_swaptotal_mb > 0
+
+- name: Remove swapfile from /etc/fstab
+  mount:
+    name: "{{ item }}"
+    fstype: swap
+    state: absent
+  with_items:
+    - swap
+    - none
+
+- name: Load containerd kernel modules
+  modprobe:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - overlay
+    - br_netfilter
+
+- name: Add kernel modules to sysctl
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_set: true
+    reload: true
+  with_items:
+    - {name: "net.bridge.bridge-nf-call-ip6tables", value: 1}
+    - {name: "net.bridge.bridge-nf-call-iptables", value: 1}
+    - {name: "net.ipv4.ip_forward", value: 1}
+    - {name: "net.ipv6.conf.all.disable_ipv6", value: 1}
+    - {name: "net.ipv6.conf.ens3.disable_ipv6", value: 1}
+    - {name: "net.ipv6.conf.default.disable_ipv6", value: 1}
+
+- name: Add new repositories keys
+  apt_key:
+    url: "{{ item }}"
+    state: present
+  with_items:
+    - 'https://packages.cloud.google.com/apt/doc/apt-key.gpg'
+    - 'https://baltocdn.com/helm/signing.asc'
+
+- name: Add new repositories to sources
+  apt_repository:
+    repo: "deb {{ item }}"
+    state: present
+  with_items:
+    - 'https://apt.kubernetes.io/ {{ k8s_distro_release }} main'
+    - 'https://baltocdn.com/helm/stable/debian/ all main'
+
+- name: Install applications required for kubernetes
+  apt:
+    name: [curl, apt-transport-https, vim, git, wget, python3-passlib, python3-pip, open-iscsi, sshpass, ca-certificates, kubelet, kubeadm, kubectl, helm, nfs-common]
+    state: present
+    update_cache: true
+
+- name: Install python libraries
+  pip: 
+    name: [bcrypt, kubernetes, pyyaml]
+    state: present

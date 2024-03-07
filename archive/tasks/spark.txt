@@ -1,0 +1,1 @@
+https://www.oak-tree.tech/blog/spark-kubernetes-primer

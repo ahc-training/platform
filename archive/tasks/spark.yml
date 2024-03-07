@@ -1,0 +1,64 @@
+- name: Create namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: spark
+
+- name: Create auth
+  ansible.builtin.set_fact:
+    auth: "{{ k8s_admin_user }}:{{ k8s_admin_user }}"
+
+- name: Create auth_enc
+  ansible.builtin.set_fact:
+    auth_enc: "{{ auth | b64encode }}"
+
+- name: Create dockerconfig
+  ansible.builtin.set_fact:
+    dockerconfig: |
+      auths:
+        registry.{{ domain }}:5000: 
+          username: {{ k8s_admin_user }}
+          password: {{ k8s_admin_user }}
+          email: {{ email }}
+          auth: {{ auth_enc }}
+
+- name: Create secret
+  kubernetes.core.k8s:
+    state: present
+    namespace: spark
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: regcred
+        namespace: spark
+      type: kubernetes.io/dockerconfigjson
+      data:
+        .dockerconfigjson: "{{ dockerconfig | from_yaml | to_nice_json | b64encode }}"
+
+- name: Install helm repo
+  kubernetes.core.helm_repository:
+    name: bitnami
+    repo_url: https://charts.bitnami.com/bitnami
+
+- name: Install helm chart
+  kubernetes.core.helm:
+    name: bitnami
+    release_namespace: spark
+    create_namespace: true
+    update_repo_cache: true
+    chart_ref: bitnami/spark
+    values: 
+      worker:
+        replicaCount: 2
+      service:
+        type: LoadBalancer
+        annotations:
+          lb.kubesphere.io/v1alpha1: openelb
+          protocol.openelb.kubesphere.io/v1alpha1: layer2
+          eip.openelb.kubesphere.io/v1alpha2: eip-k8s-pool
+        externalTrafficPolicy: Cluster
+

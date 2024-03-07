@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "minio-app"
+version = "0.1.0"
+description = ""
+authors = ["john doe <arjan.hulshoff@example.com>"]
+readme = "README.md"
+packages = [{include = "minio_app"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+minio = "^7.1.17"
+icecream = "^2.1.3"
+pendulum = "^2.1.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

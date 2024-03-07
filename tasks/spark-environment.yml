@@ -1,0 +1,181 @@
+- name: Create namespace for spark jobs
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: spark-jobs
+
+- name: Create serviceaccount for spark jobs
+  kubernetes.core.k8s:
+    state: present
+    namespace: spark-jobs
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: spark
+        namespace: "{{ item }}"
+  with_items:
+    - spark-jobs
+    - airflow
+
+- name: Create role for spark jobs
+  kubernetes.core.k8s:
+    state: present
+    namespace: spark-jobs
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: spark-role
+        namespace: spark-jobs
+      rules:
+      - apiGroups: [""]
+        resources: ["pods", "pods/exec", "services", "secrets", "pods/log", "events", "configmaps", "persistentvolumes", "persistentvolumeclaims", "persistentvolumeclaims/status"]
+        verbs: ["*"]
+
+- name: Create rolebinding for spark jobs
+  kubernetes.core.k8s:
+    state: present
+    namespace: spark-jobs
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: spark-role-binding
+        namespace: spark-jobs
+      subjects:
+      - kind: ServiceAccount
+        name: spark
+        namespace: spark-jobs
+      - kind: ServiceAccount
+        name: spark
+        namespace: airflow
+      - kind: ServiceAccount
+        name: airflow-worker
+        namespace: airflow
+      - kind: ServiceAccount
+        name: airflow-scheduler
+        namespace: airflow
+      - kind: ServiceAccount
+        name: default
+        namespace: spark-jobs
+      roleRef:
+        kind: ClusterRole
+        name: spark-role
+        apiGroup: rbac.authorization.k8s.io 
+
+- name: Create docker auth
+  ansible.builtin.set_fact: 
+    encoded_auth: "{{ (k8s_admin_user ~ ':' ~ k8s_admin_user) | b64encode }}"
+
+- name: Set docker config
+  ansible.builtin.set_fact:
+    dockerconfigjson: |
+          {
+            "auths": {
+              "registry.{{ domain }}:5000": {
+                "username": "{{ k8s_admin_user }}",
+                "password": "{{ k8s_admin_user }}",
+                "email": "{{ email }}",
+                "auth": "{{ encoded_auth }}"
+              }
+            }
+          }
+
+- name: Generate docker registry secret
+  kubernetes.core.k8s:
+    state: present
+    namespace: "{{ k8s_ns }}"
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: kubernetes.io/dockerconfigjson
+      metadata:
+        name: regcred
+        namespace: "{{ k8s_ns }}"
+      data:
+        .dockerconfigjson: "{{ dockerconfigjson | to_json | b64encode }}"
+  loop:
+    - airflow
+    - spark-jobs
+  loop_control:
+    loop_var: k8s_ns
+
+- name: Create configmap for git-sync config
+  kubernetes.core.k8s:
+    state: present
+    namespace: spark-jobs
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        namespace: spark-jobs
+        name: git-config
+      data:
+        repository: http://nas.example.com:3000/training/applications.git
+        username: sa_k8s
+        period: 30s
+        branch: main
+        root: /tmp/git
+        one-time: "true"
+
+- name: Create secret for git-sync config
+  kubernetes.core.k8s:
+    state: present
+    namespace: spark-jobs
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        namespace: spark-jobs
+        name: git-secret
+      type: Opaque
+      data:
+        password: dmFncmFudAo=
+
+- name: Configure Service for spark
+  kubernetes.core.k8s:
+    state: present
+    namespace: spark-jobs
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: spark-ui
+      spec:
+        type: LoadBalancer
+        ports:
+          - port: 4040
+            targetPort: 4040
+        selector:
+          app: spark-ui
+
+- name: Configure cronjob to clean up old pods
+  kubernetes.core.k8s:
+    state: present
+    namespace: spark-jobs
+    definition:
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata:
+        name: cleaner
+        namespace: spark-jobs
+      spec:
+        schedule: "0 0 * * *"
+        jobTemplate:
+          spec:
+            template:
+              spec:
+                serviceAccountName: spark
+                containers:
+                - name: cleaner
+                  image: portainer/kubectl-shell:latest
+                  imagePullPolicy: IfNotPresent
+                  command:
+                  - /bin/bash
+                  - -c
+                  - kubectl get pods -n spark-jobs -o=json | jq -r '.items[] | select((.status.phase == "Failed" or .status.phase == "Succeeded") and (.metadata.creationTimestamp | fromdate < (now - 86400)) ) | .metadata.name' | xargs -I {} kubectl delete pod/{} -n spark-jobs
+                restartPolicy: OnFailure

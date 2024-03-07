@@ -1,0 +1,11 @@
+version: "3"
+
+services:
+  minio:
+    image: quay.io/minio/minio server
+    ports:
+      - 9000:9000
+      - 9001:9001
+    volumes:
+      - ./data:/data
+    command: bash -c 'server /data --console-address ":9001"'

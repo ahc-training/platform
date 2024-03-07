@@ -1,0 +1,19 @@
+- hosts: "{{ groups['k8s_controlplane'][0] }}"
+  tasks:
+    - kubernetes.core.k8s_info:
+        kind: Service
+      register: all_svc
+
+    - ansible.builtin.set_fact:
+        svc_list: "{{ all_svc | json_query('resources[?status.loadBalancer.ingress[0].ip!=null].{namespace: metadata.namespace, service: metadata.name, ip: status.loadBalancer.ingress[0].ip, port: spec.ports[].port}') }}"
+      when: all_svc is defined
+
+    - ansible.builtin.set_fact:
+        svc_table: |
+          {% for svc in svc_list|sort(attribute='namespace') %}
+          {{ "%-20s" | format(svc['namespace']) }}{{ "%-50s" | format(svc['service']) }}{{ "%-20s" | format(svc['ip']) }}{{ "%-30s" | format(svc['port']) }}{{ "%-100s" | format(svc['service'] + "." + svc['namespace'] + ".svc.cluster.local") }}
+          {% endfor %}
+
+    - name: List of services with their external ip addresses
+      debug:
+        msg: "{{ svc_table }}"

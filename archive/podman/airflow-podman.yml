@@ -1,0 +1,44 @@
+- name: Check if registry pods are running
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: devops
+  register: pod_list
+  until: pod_list | json_query("resources[?starts_with(metadata.name, 'registry')].status.phase") | unique == ["Running"]
+  retries: 50
+  delay: 10
+
+- name: Get short datetime
+  ansible.builtin.set_fact:
+    short_datetime: "{{ ansible_date_time.iso8601_basic_short }}"
+
+- block:
+    - name: Create custom Airflow docker image
+      containers.podman.podman_image:
+        build:
+          rm: true
+          format: docker
+          extra_args: "--build-arg=AIRFLOW_VERSION={{ airflow_image_tag }}"
+        path: "{{ inventory_dir }}/tasks/podman/airflow"
+        name: "registry.{{ domain }}:5000/{{ airflow_image_name }}"
+        tag: "{{ image_tag }}"
+      loop:
+        - "{{ short_datetime }}"
+        - "latest"
+      loop_control:
+        loop_var: image_tag
+
+    - name: Push custom Airflow docker image
+      containers.podman.podman_image:
+        username: vagrant
+        password: vagrant
+        push: true
+        name: "registry.{{ domain }}:5000/{{ airflow_image_name }}"
+        tag: "{{ image_tag }}"
+      loop:
+        - "{{ short_datetime }}"
+        - "latest"
+      loop_control:
+        loop_var: image_tag
+    
+  delegate_to: localhost
+  delegate_facts: true

@@ -1,0 +1,15 @@
+- name: Start ISCSI initiator
+  systemd:
+    enabled: true
+    state: started
+    name: open-iscsi
+
+- name: Setup iscsi initiator
+  open_iscsi:
+    show_nodes: true
+    discover: true
+    ip: "{{ hostvars[iscsi_host]['ansible_host'] }}"
+    auto_portal_startup: true
+    login: true
+    node_user: vagrant
+    node_pass: vagrant

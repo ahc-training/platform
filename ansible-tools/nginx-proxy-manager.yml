@@ -1,0 +1,61 @@
+- hosts: 127.0.0.1
+  connection: local
+  vars:
+    database: /opt/proxy/data/database.sqlite
+  tasks:
+    - name: Remove Nginx Proxy Manager container
+      containers.podman.podman_container:
+        name: nginx_proxy
+        state: absent
+    
+    - name: Remove directories related to Nginx Proxy Manager
+      become: true
+      file:
+        state: absent
+        path: "/opt/proxy/{{ item }}"
+      with_items:
+        - data
+        - letsencrypt
+
+    - block:
+        - name: Allow port 80 to be used
+          become: true
+          ansible.posix.sysctl:
+            name: net.ipv4.ip_unprivileged_port_start
+            value: '0'
+            sysctl_set: true
+            state: present
+            reload: true
+
+        - name: Create directory
+          become: true
+          file:
+            path: "/opt/proxy/{{ item }}"
+            state: directory
+            owner: "{{ ansible_user_id }}"
+            group: "{{ ansible_user_id }}"
+            mode: 0755
+          with_items:
+            - data
+            - letsencrypt
+
+        - name: Create Nginx Proxy Manager
+          containers.podman.podman_container:
+            name: nginx_proxy
+            image: docker.io/jc21/nginx-proxy-manager:2.9.22
+            state: started
+            recreate: true
+            restart_policy: always
+            ports:
+              - 80:80
+              - 81:81
+              - 443:443
+            env:
+              DISABLE_IPV6: 'true'
+            volume:
+              - /opt/proxy/data:/data
+              - /opt/proxy/letsencrypt:/etc/letsencrypt
+            healthcheck: "/bin/check-health"
+            healthcheck_interval: 10s
+            healthcheck_timeout: 3s
+      when: true

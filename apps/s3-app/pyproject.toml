@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "s3-app"
+version = "0.1.0"
+description = ""
+authors = ["john doe <arjan.hulshoff@example.com>"]
+readme = "README.md"
+packages = [{include = "s3-app"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+boto3 = "^1.26.33"
+kubernetes-client = "^0.1.7"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,36 @@
+# - name: Create namespaces
+#   kubernetes.core.k8s:
+#     state: present
+#     definition:
+#       apiVersion: v1
+#       kind: Namespace
+#       metadata:
+#         name: registry
+
+- block:
+  - name: Create k8s-certbot docker image
+    containers.podman.podman_image:
+      build:
+        rm: true
+        format: docker
+      path: "../tasks/podman/k8s-certbot"
+      name: "{{ image_name }}"
+      tag: "{{ image_tag }}"
+
+  - name: Run k8s-certbot containers
+    containers.podman.podman_container:
+      name: k8s_certbot
+      image: "localhost/{{ image_name }}:{{ image_tag }}"
+      privileged: true
+      state: started
+      volume:
+        - "{{ lookup('env', 'HOME') }}/.kube:/k8s"
+      ports:
+        - 8080:80
+      env:
+        DOMAINS: "{{ domain }},registry.{{ domain }}"
+        EMAIL: "{{ email }}"
+        NAMESPACE: devops
+        SECRETNAME: certs-secret
+  delegate_to: localhost
+  delegate_facts: true

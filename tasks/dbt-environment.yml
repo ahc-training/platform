@@ -1,0 +1,72 @@
+- name: Create namespace for DBT Core jobs
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: dbt-jobs
+
+- name: Create docker auth
+  ansible.builtin.set_fact: 
+    encoded_auth: "{{ (k8s_admin_user ~ ':' ~ k8s_admin_user) | b64encode }}"
+
+- name: Set docker config
+  ansible.builtin.set_fact:
+    dockerconfigjson: |
+          {
+            "auths": {
+              "registry.{{ domain }}:5000": {
+                "username": "{{ k8s_admin_user }}",
+                "password": "{{ k8s_admin_user }}",
+                "email": "{{ email }}",
+                "auth": "{{ encoded_auth }}"
+              }
+            }
+          }
+
+- name: Generate docker registry secret
+  kubernetes.core.k8s:
+    state: present
+    namespace: dbt-jobs
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: kubernetes.io/dockerconfigjson
+      metadata:
+        name: regcred
+        namespace: dbt-jobs
+      data:
+        .dockerconfigjson: "{{ dockerconfigjson | to_json | b64encode }}"
+
+- name: Create configmap for git-sync config
+  kubernetes.core.k8s:
+    state: present
+    namespace: dbt-jobs
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        namespace: dbt-jobs
+        name: git-config
+      data:
+        repository: http://nas.example.com:3000/training/applications.git
+        username: sa_k8s
+        period: 30s
+        branch: main
+        root: /tmp/git
+        one-time: "true"
+
+- name: Create secret for git-sync config
+  kubernetes.core.k8s:
+    state: present
+    namespace: dbt-jobs
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        namespace: dbt-jobs
+        name: git-secret
+      type: Opaque
+      data:
+        password: dmFncmFudAo=

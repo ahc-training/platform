@@ -1,0 +1,89 @@
+- name: Create namespaces
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: airbyte
+  
+- name: Create secret to connect Airbyte to MinIO
+  kubernetes.core.k8s:
+    state: present
+    namespace: airbyte
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: airbyte-keys
+      type: Opaque
+      data:
+        access_key: "{{ acc_key | b64encode }}"
+        secret_key: "{{ sec_key | b64encode }}"
+        pgsql_password: "{{ pgsql_pwd | b64encode }}"
+  vars:
+    acc_key: 52uko0FADPhufCUh
+    sec_key: l2GZt1yvvkdCI0CgWjQtaA0fcp4Isf9Z
+    pgsql_pwd: Sql123!
+
+- name: Install helm repo
+  kubernetes.core.helm_repository:
+    name: airbyte
+    repo_url: https://airbytehq.github.io/helm-charts
+
+- name: Uninstall helm chart
+  kubernetes.core.helm:
+    name: airbyte
+    release_namespace: airbyte
+    state: absent
+
+- name: Install helm chart
+  kubernetes.core.helm:
+    name: airbyte
+    release_namespace: airbyte
+    create_namespace: true
+    update_repo_cache: true
+    chart_ref: airbyte/airbyte
+    values:
+      global:
+        state:
+          storage:
+            type: "MINIO"
+        logs:
+          accessKey:
+            existingSecret: airbyte-keys
+            existingSecretKey: access_key
+          secretKey:
+            existingSecret: airbyte-keys
+            existingSecretKey: secret_key
+          storage:
+            type: "MINIO"
+        minio:
+          enabled: false
+      postgresql:
+        enabled: false
+      externalDatabase:
+        host: bitnami-postgresql-postgresql-ha-pgpool.postgresql.svc.cluster.local
+        user: postgres
+        existingSecret: airbyte-keys
+        existingSecretPasswordKey: pgsql_pwd
+        database: airbyte
+        port: 5432
+      minio:
+        enabled: false
+      externalMinio:
+        enabled: True
+        port: 80
+        endpoint: minio.minio-data.svc
+      webapp:
+        service:
+          type: LoadBalancer
+      temporal:
+        service:
+          type: LoadBalancer
+      airbyte-api-server:
+        service:
+          type: LoadBalancer
+      worker:
+        replicaCount: 2
+

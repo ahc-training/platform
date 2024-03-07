@@ -1,0 +1,4 @@
+terraform_path: './terraform'
+iscsi_nodes: "\"iscsi_nodes\": {{ dict(groups['iscsi'] | zip(groups['iscsi'] | map('extract', hostvars, ['ansible_host']))) }}"
+k8s_controlplanes: "\"k8s_controlplanes\": {{ dict(groups['k8s_controlplane'] | zip(groups['k8s_controlplane'] | map('extract', hostvars, ['ansible_host']))) }}"
+k8s_nodes: "\"k8s_nodes\": {{ dict(groups['k8s_nodes'] | zip(groups['k8s_nodes'] | map('extract', hostvars, ['ansible_host']))) }}"

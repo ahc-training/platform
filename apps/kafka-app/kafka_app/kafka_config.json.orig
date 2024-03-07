@@ -1,0 +1,10 @@
+{
+    "sasl_mechanism": "SCRAM-SHA-256",
+    "security_protocol": "SASL_PLAINTEXT", 
+    "username": "user1", 
+    "kafka_namespace": "kafka",
+    "kafka_hosts": ["192.167.56.103:9092"],
+    "kafka_topic": "my-topic",
+    "group_id": "Group1"
+}
+

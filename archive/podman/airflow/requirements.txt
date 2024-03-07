@@ -1,0 +1,31 @@
+# snakebite-py3
+# hmsclient
+# pandas
+# pyhive[hive]
+# sasl
+# thrift
+# hdfs[avro,dataframe,kerberos]
+apache-airflow[cncf-kubernetes]
+apache-airflow[virtualenv]
+apache-airflow[common.sql]
+apache-airflow[apache.spark]
+airflow-provider-kafka 
+apache-airflow[snowflake]
+apache-airflow[apache.hdfs] 
+apache-airflow[apache.hive]
+apache-airflow[mongo]
+apache-airflow[microsoft.mssql]
+apache-airflow[postgres]
+apache-airflow[oracle]
+apache-airflow[samba]
+apache-airflow[discord]
+apache-airflow[elasticsearch]
+apache-airflow[github]
+apache-airflow[redis]
+apache-airflow[slack]
+apache-airflow[airbyte]
+apache-airflow[amazon]
+apache-airflow[http]
+apache-airflow[dbt.cloud]
+kubernetes
+jenkinsapi

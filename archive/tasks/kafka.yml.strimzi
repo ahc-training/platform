@@ -1,0 +1,60 @@
+- name: Install helm repo
+  kubernetes.core.helm_repository:
+    name: strimzi
+    repo_url: https://strimzi.io/charts/
+
+- name: Install helm chart
+  kubernetes.core.helm:
+    name: kafka
+    release_namespace: kafka
+    create_namespace: true
+    update_repo_cache: true
+    chart_ref: strimzi/strimzi-kafka-operator
+
+- name: Check if kafka-operator pods are running
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: kafka
+  register: pod_list
+  until: pod_list | json_query("resources[?starts_with(metadata.name, 'strimzi-cluster-operator-')].status.phase") | unique == ["Running"]
+  retries: 10
+  delay: 10
+
+- name: Setup kafka
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: kafka.strimzi.io/v1beta2
+      kind: Kafka
+      metadata:
+        name: my-cluster
+        namespace: kafka
+      spec:
+        kafka:
+          version: 3.3.1
+          replicas: 2
+          listeners:
+            - name: plain
+              port: 9092
+              type: internal
+              tls: false
+            - name: tls
+              port: 9093
+              type: internal
+              tls: true
+          config:
+            offsets.topic.replication.factor: 3
+            transaction.state.log.replication.factor: 3
+            transaction.state.log.min.isr: 2
+            default.replication.factor: 3
+            min.insync.replicas: 2
+            inter.broker.protocol.version: "3.3"
+          storage:
+            type: ephemeral
+        zookeeper:
+          replicas: 2
+          storage:
+            type: ephemeral
+        entityOperator:
+          topicOperator: {}
+          userOperator: {}

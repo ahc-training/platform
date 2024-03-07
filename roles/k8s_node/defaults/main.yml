@@ -1,0 +1,4 @@
+k8s_admin_user: "vagrant"
+k8s_admin_group: "vagrant"
+k8s_cluster_name: "k8s-cluster"
+iscsi_host: iscsi-n-1

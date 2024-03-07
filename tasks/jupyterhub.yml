@@ -1,0 +1,22 @@
+- name: Install helm repo
+  kubernetes.core.helm_repository:
+    name: jupyterhub
+    repo_url: https://hub.jupyter.org/helm-chart/
+
+- name: Uninstall helm chart
+  kubernetes.core.helm:
+    name: jupyterhub
+    release_namespace: spark
+    state: absent
+
+- name: Install helm chart
+  kubernetes.core.helm:
+    name: jupyterhub
+    release_namespace: spark
+    create_namespace: true
+    update_repo_cache: true
+    chart_ref: jupyterhub/jupyterhub
+    values: 
+      hub:
+        service:
+          type: LoadBalancer
